@@ -6,7 +6,7 @@ argument-hint: [test|patch|minor|major|<x.y.z>]
 # /release — cut a grok-mcp release
 
 You are cutting a grok-mcp release. Follow these steps **exactly**, in order.
-**Never skip the confirmation step.** Speak to Chloe in German; commit messages
+**Never skip the confirmation step.** Speak to the owner in German; commit messages
 and tag names stay English.
 
 The release pipeline produces one artifact from a single `v*` tag push:
@@ -29,7 +29,7 @@ commits since the previous tag.
 
 ## Step 1 — Sanity checks
 
-Run all four. If any fails, stop and report to Chloe — do not proceed.
+Run all four. If any fails, stop and report to the owner — do not proceed.
 
 ```bash
 git rev-parse --abbrev-ref HEAD                                    # must be 'main'
@@ -66,7 +66,7 @@ Then parse `$ARGUMENTS`:
 
 | Arg | Action |
 |---|---|
-| empty | any **feature** commits → **minor**; only **fix** + **maintenance** → **patch**; only **maintenance** (docs/tests/refactor) → **nothing to release**, stop here and tell Chloe |
+| empty | any **feature** commits → **minor**; only **fix** + **maintenance** → **patch**; only **maintenance** (docs/tests/refactor) → **nothing to release**, stop here and tell the owner |
 | `test` | same classification as empty, but stop after the plan in Step 4 |
 | `patch` | force Z+1 |
 | `minor` | force Y+1, Z=0 |
@@ -78,7 +78,7 @@ may differ if a previous release wasn't tagged or vice versa).
 
 ## Step 4 — Show the plan, ask for confirmation
 
-Print to Chloe in German, exactly like:
+Print to the owner in German, exactly like:
 
 ```
 Letzter Tag:          v1.0.0
@@ -90,9 +90,9 @@ Neuer Tag:            v1.1.0
 ```
 
 Then list the commits since the last tag, grouped by bucket
-(feature / fix / maintenance), as a sanity check Chloe can scan.
+(feature / fix / maintenance), as a sanity check the owner can scan.
 
-**If `$ARGUMENTS` is `test`: stop here. Do not change any files. Tell Chloe
+**If `$ARGUMENTS` is `test`: stop here. Do not change any files. Tell the owner
 „Trockenlauf — nichts geändert."**
 
 Otherwise: ask **„OK so? [j/n]"** and wait for her answer.
@@ -125,7 +125,7 @@ dotnet test tests/GrokMcp.Tests/GrokMcp.Tests.csproj --nologo --verbosity quiet
 
 Catches compile errors and test regressions locally before the tag goes out.
 The full test suite runs in well under a second, so the cost is negligible.
-If either fails, **stop**, show the error to Chloe, leave the working tree
+If either fails, **stop**, show the error to the owner, leave the working tree
 as-is so she can inspect — do not commit, do not tag, do not push.
 
 ## Step 7 — Commit, tag, push
@@ -144,7 +144,7 @@ per repo convention.
 
 ## Step 8 — Hand off
 
-Tell Chloe in German:
+Tell the owner in German:
 
 ```
 Release vNEW ist raus.
@@ -152,7 +152,7 @@ Release vNEW ist raus.
 - dotnet test gate vor dem Installer-Build
 - Inno Setup installer wird via choco+ISCC gebaut und an Release angehängt
 - GitHub Release wird automatisch erstellt mit auto-generated release notes
-- CI-Status: https://github.com/chloe-dream/grok-mcp/actions
+- CI-Status: https://github.com/SACRVM/grok-mcp/actions
 ```
 
 Do **not** poll or wait for the CI run — just hand off.
@@ -165,5 +165,5 @@ Do **not** poll or wait for the CI run — just hand off.
 - The `/release` invocation is the explicit user authorization for the tag push
   and the public GitHub Release that follows.
 - If anything is unclear or smells wrong (e.g., no commits since last tag,
-  csproj/tag version mismatch, weird state), stop and ask Chloe instead of
+  csproj/tag version mismatch, weird state), stop and ask the owner instead of
   guessing.

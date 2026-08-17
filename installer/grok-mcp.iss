@@ -21,10 +21,10 @@
 AppId={{7B5E2C8A-9F4D-4B1E-A6C3-7B2D1E3F4A50}
 AppName=grok-mcp
 AppVersion={#AppVersion}
-AppPublisher=Chloe Bernette
-AppPublisherURL=https://github.com/Chloe3DX/grok-mcp
-AppSupportURL=https://github.com/Chloe3DX/grok-mcp/issues
-AppUpdatesURL=https://github.com/Chloe3DX/grok-mcp/releases
+AppPublisher=SACRVM
+AppPublisherURL=https://github.com/SACRVM/grok-mcp
+AppSupportURL=https://github.com/SACRVM/grok-mcp/issues
+AppUpdatesURL=https://github.com/SACRVM/grok-mcp/releases
 DefaultDirName={localappdata}\Programs\grok-mcp
 DefaultGroupName=grok-mcp
 DisableProgramGroupPage=yes

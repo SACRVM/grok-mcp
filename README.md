@@ -23,7 +23,7 @@ One background process, many parallel Claude Code clients. Loopback-only (127.0.
 
 ## Install (Windows)
 
-1. Download `GrokMcpSetup-<version>-win-x64.exe` from the [Releases](https://github.com/Chloe3DX/grok-mcp/releases) page, or build it yourself (see [Build from source](#build-from-source)).
+1. Download `GrokMcpSetup-<version>-win-x64.exe` from the [Releases](https://github.com/SACRVM/grok-mcp/releases) page, or build it yourself (see [Build from source](#build-from-source)).
 2. Run the installer. It will:
    - Prompt you for your `XAI_API_KEY` (get one from [console.x.ai](https://console.x.ai/) — pasted into `%LOCALAPPDATA%\grok-mcp\config.env`, never logged).
    - Install to `%LOCALAPPDATA%\Programs\grok-mcp\` (no UAC).
@@ -119,7 +119,7 @@ After install, in a fresh Claude Code session with the MCP wired up:
 2. *"Use grok_chat to greet me in five languages."* Expect a few seconds' round-trip (`grok-4.5` reasons before answering); log shows token usage.
 3. *"Use grok_chat_fast to name the capital of France in one word."* Expect "Paris" and no reasoning tokens — this is the non-reasoning path.
 4. *"Use grok_chat_multi_agent with agents=4 to sanity-check <some claim>."* Expect a reconciled answer, often ending in a `\confidence{N}` marker. Slower and far more tokens than `grok_chat` — that's inherent to the model.
-5. *"Use grok_chat with session_id='test1' to remember my name is Chloe. Then in a separate call with the same session_id ask what my name is."* Expect "Chloe". This works **across different Claude Code sessions** now — try it with two terminal windows open.
+5. *"Use grok_chat with session_id='test1' to remember my name is Ada. Then in a separate call with the same session_id ask what my name is."* Expect "Ada". This works **across different Claude Code sessions** now — try it with two terminal windows open.
 6. *"Use grok_generate_image with prompt='a tiny pixel-art mushroom on transparent background' and output_path='C:\\Users\\you\\Desktop\\grok-test\\mushroom.png'."* Expect the file on disk + Claude can describe the inline image without re-reading it.
 7. *"Use grok_edit_image with images=['…\\mushroom.png'], prompt='now make it a glowing crystal mushroom', output_path='…\\crystal.png'."* Expect a recognizably-derived new image.
 8. *"Use grok_describe_image on `crystal.png` and tell me its color palette."* Expect coherent description.
