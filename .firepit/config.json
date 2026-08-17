@@ -1,8 +1,10 @@
 {
+  "commands": [
+    { "name": "GitHub", "type": "url", "url": "https://github.com/SACRVM/grok-mcp", "icon": "🐙" }
+  ],
   "version": 1,
   "id": "grok-mcp",
 
   "quickLinks": [
-    { "name": "GitHub", "url": "https://github.com/SACRVM/grok-mcp" }
   ]
 }
