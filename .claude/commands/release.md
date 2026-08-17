@@ -95,7 +95,7 @@ Then list the commits since the last tag, grouped by bucket
 **If `$ARGUMENTS` is `test`: stop here. Do not change any files. Tell the owner
 „Trockenlauf — nichts geändert."**
 
-Otherwise: ask **„OK so? [j/n]"** and wait for her answer.
+Otherwise: ask **„OK so? [j/n]"** and wait for the answer.
 - `j` / `ja` / `y` / `yes` → continue to Step 5
 - anything else → abort, change nothing
 
@@ -126,7 +126,7 @@ dotnet test tests/GrokMcp.Tests/GrokMcp.Tests.csproj --nologo --verbosity quiet
 Catches compile errors and test regressions locally before the tag goes out.
 The full test suite runs in well under a second, so the cost is negligible.
 If either fails, **stop**, show the error to the owner, leave the working tree
-as-is so she can inspect — do not commit, do not tag, do not push.
+as-is for inspection — do not commit, do not tag, do not push.
 
 ## Step 7 — Commit, tag, push
 
