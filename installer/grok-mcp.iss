@@ -204,13 +204,13 @@ begin
     'XAI_API_KEY=' + newKey + nl +
     nl +
     '# Optional model overrides (defaults shown):' + nl +
-    '# GROK_MCP_CHAT_MODEL=grok-4.5' + nl +
-    '# GROK_MCP_CREATIVE_MODEL=grok-4.5' + nl +
+    '# GROK_MCP_CHAT_MODEL=grok-4.6' + nl +
+    '# GROK_MCP_CREATIVE_MODEL=grok-4.6' + nl +
     '# grok_chat_fast needs a model that cannot reason:' + nl +
     '# GROK_MCP_FAST_MODEL=grok-4.20-0309-non-reasoning' + nl +
     '# GROK_MCP_MULTI_AGENT_MODEL=grok-4.20-multi-agent-0309' + nl +
-    '# GROK_MCP_IMAGE_MODEL=grok-imagine-image' + nl +
-    '# Video model pins both modes; default auto-selects per call:' + nl +
+    '# GROK_MCP_IMAGE_MODEL=grok-imagine-image-2.0' + nl +
+    '# One video model for text-to-video and image-to-video:' + nl +
     '# GROK_MCP_VIDEO_MODEL=grok-imagine-video-1.5' + nl +
     nl +
     '# Optional runtime tuning:' + nl +

@@ -6,17 +6,19 @@ public class GrokOptions
 {
     public string ApiKey { get; set; } = "";
     public string ApiBaseUrl { get; set; } = "https://api.x.ai/v1";
-    public string ChatModel { get; set; } = "grok-4.5";
-    public string CreativeModel { get; set; } = "grok-4.5";
+    public string ChatModel { get; set; } = "grok-4.6";
+    public string CreativeModel { get; set; } = "grok-4.6";
     // Dedicated non-reasoning model behind grok_chat_fast. Not a "cheap tier" of ChatModel:
-    // grok-4.5 rejects reasoning_effort='none' outright, so the fast path needs its own model.
+    // grok-4.6 rejects reasoning_effort='none' outright, so the fast path needs its own model.
     public string FastModel { get; set; } = "grok-4.20-0309-non-reasoning";
     // Only reachable via /responses — xAI rejects this model on /chat/completions.
     public string MultiAgentModel { get; set; } = "grok-4.20-multi-agent-0309";
-    public string ImageModel { get; set; } = "grok-imagine-image";
-    // Empty = auto-select per call in GrokClient.VideosAsync (image-to-video and text-to-video
-    // need different models). Set GROK_MCP_VIDEO_MODEL to pin one model for both modes.
-    public string VideoModel { get; set; } = "";
+    // The only image model that honours the 'quality' parameter. grok-imagine-image (1.0)
+    // accepts it silently and ignores it; grok-imagine-image-quality retires on 2026-11-02.
+    public string ImageModel { get; set; } = "grok-imagine-image-2.0";
+    // One model for text-to-video and image-to-video since xAI added text-to-video to 1.5
+    // (2026-07-31). GROK_MCP_VIDEO_MODEL overrides it; the older grok-imagine-video tops out at 720p.
+    public string VideoModel { get; set; } = "grok-imagine-video-1.5";
     public int HttpTimeoutSeconds { get; set; } = 300;
     public int SessionTurnCap { get; set; } = 50;
     public int ListenPort { get; set; } = 6677;

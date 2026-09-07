@@ -63,11 +63,18 @@ public class GrokOptionsTests : IDisposable
         Assert.Equal("ok", Environment.GetEnvironmentVariable(key));
     }
 
+    // The defaults are the release contract: each name is checked against xAI's live inventory
+    // before a release (see CLAUDE.md), so a silent drift here should fail loudly.
     [Fact]
-    public void VideoModel_default_is_empty_meaning_auto_select_per_call()
+    public void Model_defaults_match_the_release_contract()
     {
         var o = new GrokOptions();
-        Assert.Equal("", o.VideoModel);
+        Assert.Equal("grok-4.6", o.ChatModel);
+        Assert.Equal("grok-4.6", o.CreativeModel);
+        Assert.Equal("grok-4.20-0309-non-reasoning", o.FastModel);
+        Assert.Equal("grok-4.20-multi-agent-0309", o.MultiAgentModel);
+        Assert.Equal("grok-imagine-image-2.0", o.ImageModel);
+        Assert.Equal("grok-imagine-video-1.5", o.VideoModel);
     }
 
     [Fact]

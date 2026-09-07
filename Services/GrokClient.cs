@@ -84,8 +84,11 @@ public class GrokClient
             ["input"] = msgList,
             ["temperature"] = temperature,
         };
+        // /responses documents the nested form; the flat 'reasoning_effort' is only a fallback
+        // xAI reads when 'reasoning' is absent. Neither form rejects an unknown value (the call
+        // just runs with some default), so the tool layer must validate before we get here.
         if (!string.IsNullOrWhiteSpace(reasoningEffort))
-            body["reasoning_effort"] = reasoningEffort;
+            body["reasoning"] = new { effort = reasoningEffort };
 
         var url = $"{_opts.ApiBaseUrl.TrimEnd('/')}/responses";
         var promptPreview = TryExtractFirstUserText(msgList);
@@ -161,6 +164,7 @@ public class GrokClient
         int n,
         string? aspectRatio,
         string? resolution,
+        string? quality,
         string responseFormat,
         IReadOnlyList<object>? inputs,
         CancellationToken ct)
@@ -179,6 +183,9 @@ public class GrokClient
             body["aspect_ratio"] = aspectRatio;
         if (!string.IsNullOrWhiteSpace(resolution))
             body["resolution"] = resolution;
+        // Only grok-imagine-image-2.0 honours this; the 1.0 model accepts and ignores it.
+        if (!string.IsNullOrWhiteSpace(quality))
+            body["quality"] = quality;
 
         if (hasInputs)
         {
@@ -210,6 +217,20 @@ public class GrokClient
                 results.Add(bytes);
             }
         }
+
+        // xAI reports the model that actually served the request (a retired slug is redirected
+        // server-side) and the exact cost; both matter now that quality and resolution change
+        // the per-image price. Mirrors the token line every chat call logs.
+        var servedModel = doc.RootElement.TryGetProperty("model", out var servedProp)
+            ? servedProp.GetString() ?? resolvedModel
+            : resolvedModel;
+        if (doc.RootElement.TryGetProperty("usage", out var imgUsage)
+            && imgUsage.TryGetProperty("cost_in_usd_ticks", out var ticksProp)
+            && ticksProp.TryGetInt64(out var ticks))
+            _log.LogInformation("Grok image [{Model}] done — {Count} image(s), ${Cost:0.000}",
+                servedModel, results.Count, ticks / 1e10);
+        else
+            _log.LogInformation("Grok image [{Model}] done — {Count} image(s)", servedModel, results.Count);
         return results;
     }
 
@@ -222,16 +243,16 @@ public class GrokClient
         string? aspectRatio,
         string? resolution,
         object? imageInput,
+        bool? generateAudio,
         CancellationToken ct)
     {
-        // Priority: explicit per-call model → GROK_MCP_VIDEO_MODEL pin → auto-select by mode.
-        // Auto-select is mode-dependent because grok-imagine-video-1.5 rejects text-to-video
-        // with HTTP 400 "Text-to-video is not supported for this model" (live-verified 2026-07-02);
-        // the older grok-imagine-video handles text-to-video fine.
+        // Priority: explicit per-call model → GROK_MCP_VIDEO_MODEL (defaults to
+        // grok-imagine-video-1.5) → hard fallback for an empty option. One model serves both
+        // text-to-video and image-to-video since xAI added text-to-video to 1.5 on 2026-07-31
+        // (live-verified 2026-09-07); the older grok-imagine-video has no 1080p.
         var resolvedModel = !string.IsNullOrWhiteSpace(model) ? model
             : !string.IsNullOrWhiteSpace(_opts.VideoModel) ? _opts.VideoModel
-            : imageInput != null ? "grok-imagine-video-1.5"
-            : "grok-imagine-video";
+            : "grok-imagine-video-1.5";
 
         var body = new Dictionary<string, object>
         {
@@ -245,6 +266,8 @@ public class GrokClient
             body["resolution"] = resolution;
         if (imageInput != null)
             body["image"] = imageInput;
+        if (generateAudio is { } audio)
+            body["generate_audio"] = audio;
 
         var endpoint = $"{_opts.ApiBaseUrl.TrimEnd('/')}/videos/generations";
         var json = await PostWithRetryAsync(endpoint, body, resolvedModel, prompt, conversationId: null, ct);

@@ -11,13 +11,13 @@ One background process, many parallel Claude Code clients. Loopback-only (127.0.
 
 | Tool | What it does |
 |---|---|
-| `grok_chat` | Chat completion on the flagship model (`grok-4.5`). Always reasons. Stateless by default; pass `session_id` to keep an in-memory thread within the server's process lifetime. Sessions are shared across all connected clients. |
+| `grok_chat` | Chat completion on the flagship model (`grok-4.6`). Always reasons. Stateless by default; pass `session_id` to keep an in-memory thread within the server's process lifetime. Sessions are shared across all connected clients. |
 | `grok_chat_fast` | Same, on a dedicated non-reasoning model (`grok-4.20-0309-non-reasoning`, 1M context). Answers without thinking first — for lookups, classification, extraction, reformatting. |
 | `grok_chat_multi_agent` | Sends a hard problem to `grok-4.20-multi-agent-0309`, where `agents` (4 or 16) work it in parallel and reconcile. Slow and token-hungry; reserve it for problems worth the cross-check. |
-| `grok_generate_image` | Text → image, saved to `output_path` and returned inline so Claude sees it. |
-| `grok_edit_image` | Input image(s) + prompt → modified image, same output handling. |
+| `grok_generate_image` | Text → image, saved to `output_path` and returned inline so Claude sees it. Runs on `grok-imagine-image-2.0`; `quality` (`low` / `medium` / `auto`) tunes render cost. |
+| `grok_edit_image` | Up to five input images + prompt → modified image, same output handling. |
 | `grok_describe_image` | Vision: ask Grok to analyze image(s). Returns text. |
-| `grok_generate_video` | Text (+ optional seed image) → video, saved to `output_path` as MP4. Generation is asynchronous on xAI's side — the call polls until done and can block for minutes. Text-only result (no inline preview). |
+| `grok_generate_video` | Text (+ optional seed image) → video with an optional audio track, saved to `output_path` as MP4. Runs on `grok-imagine-video-1.5` (up to 1080p). Generation is asynchronous on xAI's side — the call polls until done and can block for minutes. Text-only result (no inline preview). |
 
 `output_path` on the image tools must be **absolute** — Claude Code's working directory is not the server's working directory. For `n>1`, the index is inserted before the extension (`mushroom.png` → `mushroom-1.png`, `mushroom-2.png`, …). Image-input parameters accept any of: `https://…` URL, absolute file path, `data:image/...;base64,…` URI, or raw base64.
 
@@ -46,12 +46,12 @@ The server reads `config.env` files at startup. Priority (highest wins):
 | Var | Default | Purpose |
 |---|---|---|
 | `XAI_API_KEY` | — (required, fail fast) | Bearer token |
-| `GROK_MCP_CHAT_MODEL` | `grok-4.5` | default `grok_chat` model |
-| `GROK_MCP_CREATIVE_MODEL` | `grok-4.5` | default vision/heavy model |
+| `GROK_MCP_CHAT_MODEL` | `grok-4.6` | default `grok_chat` model |
+| `GROK_MCP_CREATIVE_MODEL` | `grok-4.6` | default vision/heavy model |
 | `GROK_MCP_FAST_MODEL` | `grok-4.20-0309-non-reasoning` | model behind `grok_chat_fast`; must be one that cannot reason |
 | `GROK_MCP_MULTI_AGENT_MODEL` | `grok-4.20-multi-agent-0309` | model behind `grok_chat_multi_agent` (needs the `/responses` endpoint) |
-| `GROK_MCP_IMAGE_MODEL` | `grok-imagine-image` | default image gen/edit model |
-| `GROK_MCP_VIDEO_MODEL` | (auto) | pin video model; default auto-selects `grok-imagine-video-1.5` (image-to-video) / `grok-imagine-video` (text-to-video) |
+| `GROK_MCP_IMAGE_MODEL` | `grok-imagine-image-2.0` | default image gen/edit model; the only one that honours `quality` |
+| `GROK_MCP_VIDEO_MODEL` | `grok-imagine-video-1.5` | default video model for text-to-video and image-to-video |
 | `GROK_MCP_LOG_LEVEL` | `Information` | `Trace`/`Debug`/`Information`/`Warning`/`Error` |
 | `GROK_MCP_LOG_DIR` | `%LOCALAPPDATA%\grok-mcp\logs` | rolling-file log directory |
 | `GROK_MCP_HTTP_TIMEOUT_SEC` | `300` | HttpClient timeout |
@@ -116,7 +116,7 @@ Tests do not hit the xAI API — that surface is still verified manually via the
 After install, in a fresh Claude Code session with the MCP wired up:
 
 1. `/mcp` — `grok` connected, 7 tools listed.
-2. *"Use grok_chat to greet me in five languages."* Expect a few seconds' round-trip (`grok-4.5` reasons before answering); log shows token usage.
+2. *"Use grok_chat to greet me in five languages."* Expect a few seconds' round-trip (`grok-4.6` reasons before answering); log shows token usage.
 3. *"Use grok_chat_fast to name the capital of France in one word."* Expect "Paris" and no reasoning tokens — this is the non-reasoning path.
 4. *"Use grok_chat_multi_agent with agents=4 to sanity-check <some claim>."* Expect a reconciled answer, often ending in a `\confidence{N}` marker. Slower and far more tokens than `grok_chat` — that's inherent to the model.
 5. *"Use grok_chat with session_id='test1' to remember my name is Ada. Then in a separate call with the same session_id ask what my name is."* Expect "Ada". This works **across different Claude Code sessions** now — try it with two terminal windows open.
@@ -137,7 +137,7 @@ grok-mcp\
 │   ├── ChatSessionStore.cs   (in-memory session history, shared across HTTP clients)
 │   ├── ImageInputResolver.cs (URL / path / data-URI / base64 → data URI)
 │   └── ImageWriter.cs        (resolve path, write bytes, return paths)
-├── Tools\GrokTools.cs        (the 5 [McpServerTool] methods)
+├── Tools\GrokTools.cs        (the 7 [McpServerTool] methods)
 ├── tests\GrokMcp.Tests\      (xUnit — services, GrokClient, GrokTools)
 ├── installer\                (Inno Setup script + companion PowerShell)
 └── scripts\                  (developer helpers — dev-update.ps1)

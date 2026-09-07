@@ -196,6 +196,9 @@ public class GrokClientTests
         Assert.Equal($"{ApiBase}/responses", req.Uri.ToString());
         Assert.Contains("\"model\":\"test-multi-agent\"", req.Body);
         Assert.Contains("\"input\":", req.Body);
+        // xAI documents the nested form for /responses; the flat field is only a fallback there.
+        Assert.Contains("\"reasoning\":{\"effort\":\"xhigh\"}", req.Body);
+        Assert.DoesNotContain("reasoning_effort", req.Body);
     }
 
     [Fact]
@@ -241,6 +244,7 @@ public class GrokClientTests
             n: 1,
             aspectRatio: "1:1",
             resolution: null,
+            quality: null,
             responseFormat: "b64_json",
             inputs: null,
             CancellationToken.None);
@@ -265,6 +269,7 @@ public class GrokClientTests
             n: 1,
             aspectRatio: "1:1",
             resolution: "2k",
+            quality: null,
             responseFormat: "b64_json",
             inputs: null,
             CancellationToken.None);
@@ -287,12 +292,57 @@ public class GrokClientTests
             n: 1,
             aspectRatio: "1:1",
             resolution: null,
+            quality: null,
             responseFormat: "b64_json",
             inputs: null,
             CancellationToken.None);
 
         var req = Assert.Single(handler.Requests);
         Assert.DoesNotContain("resolution", req.Body);
+    }
+
+    [Fact]
+    public async Task ImagesAsync_with_quality_serializes_into_body()
+    {
+        var (client, handler) = Build();
+        var b64 = Convert.ToBase64String(new byte[] { 0x89, 0x50, 0x4E, 0x47 });
+        handler.EnqueueJson(HttpStatusCode.OK, $$"""{"data":[{"b64_json":"{{b64}}"}]}""");
+
+        await client.ImagesAsync(
+            prompt: "a circle",
+            model: null,
+            n: 1,
+            aspectRatio: "1:1",
+            resolution: null,
+            quality: "medium",
+            responseFormat: "b64_json",
+            inputs: null,
+            CancellationToken.None);
+
+        var req = Assert.Single(handler.Requests);
+        Assert.Contains("\"quality\":\"medium\"", req.Body);
+    }
+
+    [Fact]
+    public async Task ImagesAsync_without_quality_omits_field()
+    {
+        var (client, handler) = Build();
+        var b64 = Convert.ToBase64String(new byte[] { 0x89, 0x50, 0x4E, 0x47 });
+        handler.EnqueueJson(HttpStatusCode.OK, $$"""{"data":[{"b64_json":"{{b64}}"}]}""");
+
+        await client.ImagesAsync(
+            prompt: "a circle",
+            model: null,
+            n: 1,
+            aspectRatio: "1:1",
+            resolution: null,
+            quality: null,
+            responseFormat: "b64_json",
+            inputs: null,
+            CancellationToken.None);
+
+        var req = Assert.Single(handler.Requests);
+        Assert.DoesNotContain("quality", req.Body);
     }
 
     [Fact]
@@ -309,6 +359,7 @@ public class GrokClientTests
             n: 1,
             aspectRatio: "1:1",
             resolution: null,
+            quality: null,
             responseFormat: "b64_json",
             inputs: inputs,
             CancellationToken.None);
@@ -328,7 +379,7 @@ public class GrokClientTests
             $$"""{"data":[{"b64_json":"{{b1}}"},{"b64_json":"{{b2}}"}]}""");
 
         var bytesList = await client.ImagesAsync(
-            "p", null, n: 2, "1:1", null, "b64_json", inputs: null, CancellationToken.None);
+            "p", null, n: 2, "1:1", null, null, "b64_json", inputs: null, CancellationToken.None);
 
         Assert.Equal(2, bytesList.Count);
         Assert.Equal(new byte[] { 0x01, 0x02 }, bytesList[0]);
@@ -381,6 +432,7 @@ public class GrokClientTests
             aspectRatio: "16:9",
             resolution: "720p",
             imageInput: null,
+            generateAudio: null,
             CancellationToken.None);
 
         Assert.Equal(videoBytes, result.Bytes);
@@ -413,6 +465,7 @@ public class GrokClientTests
             aspectRatio: "9:16",
             resolution: "1080p",
             imageInput: imageInput,
+            generateAudio: true,
             CancellationToken.None);
 
         var postReq = handler.Requests[0];
@@ -422,10 +475,13 @@ public class GrokClientTests
         Assert.Contains("\"aspect_ratio\":\"9:16\"", postReq.Body);
         Assert.Contains("\"resolution\":\"1080p\"", postReq.Body);
         Assert.Contains("\"image\":{\"url\":\"data:image/png;base64,AAAA\"}", postReq.Body);
+        Assert.Contains("\"generate_audio\":true", postReq.Body);
     }
 
+    // Since 2026-07-31 grok-imagine-video-1.5 serves text-to-video too, so one default model
+    // covers both modes. An empty VideoModel option still resolves to it rather than to nothing.
     [Fact]
-    public async Task VideosAsync_text_to_video_auto_selects_grok_imagine_video_and_omits_optional_fields()
+    public async Task VideosAsync_text_to_video_falls_back_to_grok_imagine_video_1_5_and_omits_optional_fields()
     {
         var (client, handler) = Build();
         client._videoPollInterval = TimeSpan.Zero;
@@ -435,19 +491,19 @@ public class GrokClientTests
             """{"status":"done","video":{"url":"https://cdn.example.test/v.mp4"}}""");
         handler.EnqueueBytes(HttpStatusCode.OK, new byte[] { 1 });
 
-        var result = await client.VideosAsync("p", null, 8, null, null, null, CancellationToken.None);
+        var result = await client.VideosAsync("p", null, 8, null, null, null, null, CancellationToken.None);
 
         Assert.Null(result.DurationSeconds);
         var postReq = handler.Requests[0];
-        Assert.Contains("\"model\":\"grok-imagine-video\"", postReq.Body);
-        Assert.DoesNotContain("grok-imagine-video-1.5", postReq.Body);
+        Assert.Contains("\"model\":\"grok-imagine-video-1.5\"", postReq.Body);
         Assert.DoesNotContain("aspect_ratio", postReq.Body);
         Assert.DoesNotContain("resolution", postReq.Body);
         Assert.DoesNotContain("\"image\"", postReq.Body);
+        Assert.DoesNotContain("generate_audio", postReq.Body);
     }
 
     [Fact]
-    public async Task VideosAsync_image_to_video_auto_selects_grok_imagine_video_1_5()
+    public async Task VideosAsync_image_to_video_uses_the_same_default_model()
     {
         var (client, handler) = Build();
         client._videoPollInterval = TimeSpan.Zero;
@@ -458,13 +514,29 @@ public class GrokClientTests
         handler.EnqueueBytes(HttpStatusCode.OK, new byte[] { 1 });
 
         var imageInput = new { url = "data:image/png;base64,AAAA" };
-        await client.VideosAsync("p", null, 8, null, null, imageInput, CancellationToken.None);
+        await client.VideosAsync("p", null, 8, null, null, imageInput, null, CancellationToken.None);
 
         Assert.Contains("\"model\":\"grok-imagine-video-1.5\"", handler.Requests[0].Body);
     }
 
     [Fact]
-    public async Task VideosAsync_pinned_video_model_wins_over_auto_select()
+    public async Task VideosAsync_serializes_generate_audio_false_when_provided()
+    {
+        var (client, handler) = Build();
+        client._videoPollInterval = TimeSpan.Zero;
+
+        handler.EnqueueJson(HttpStatusCode.OK, SuccessVideoStartJson);
+        handler.EnqueueJson(HttpStatusCode.OK,
+            """{"status":"done","video":{"url":"https://cdn.example.test/v.mp4"}}""");
+        handler.EnqueueBytes(HttpStatusCode.OK, new byte[] { 1 });
+
+        await client.VideosAsync("p", null, 8, null, null, null, false, CancellationToken.None);
+
+        Assert.Contains("\"generate_audio\":false", handler.Requests[0].Body);
+    }
+
+    [Fact]
+    public async Task VideosAsync_pinned_video_model_wins_over_default()
     {
         var (client, handler) = Build(videoModel: "pinned-video-model");
         client._videoPollInterval = TimeSpan.Zero;
@@ -474,7 +546,7 @@ public class GrokClientTests
             """{"status":"done","video":{"url":"https://cdn.example.test/v.mp4"}}""");
         handler.EnqueueBytes(HttpStatusCode.OK, new byte[] { 1 });
 
-        await client.VideosAsync("p", null, 8, null, null, null, CancellationToken.None);
+        await client.VideosAsync("p", null, 8, null, null, null, null, CancellationToken.None);
 
         Assert.Contains("\"model\":\"pinned-video-model\"", handler.Requests[0].Body);
     }
@@ -490,7 +562,7 @@ public class GrokClientTests
             """{"status":"done","video":{"url":"https://cdn.example.test/v.mp4"}}""");
         handler.EnqueueBytes(HttpStatusCode.OK, new byte[] { 1 });
 
-        await client.VideosAsync("p", "explicit-model", 8, null, null, null, CancellationToken.None);
+        await client.VideosAsync("p", "explicit-model", 8, null, null, null, null, CancellationToken.None);
 
         Assert.Contains("\"model\":\"explicit-model\"", handler.Requests[0].Body);
         Assert.DoesNotContain("pinned-video-model", handler.Requests[0].Body);
@@ -506,7 +578,7 @@ public class GrokClientTests
         handler.EnqueueJson(HttpStatusCode.OK, """{"status":"failed","error":"content policy violation"}""");
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            client.VideosAsync("p", null, 8, null, null, null, CancellationToken.None));
+            client.VideosAsync("p", null, 8, null, null, null, null, CancellationToken.None));
 
         Assert.Contains("failed", ex.Message);
         Assert.Contains("req-123", ex.Message);
@@ -523,7 +595,7 @@ public class GrokClientTests
         handler.EnqueueJson(HttpStatusCode.OK, """{"status":"expired"}""");
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            client.VideosAsync("p", null, 8, null, null, null, CancellationToken.None));
+            client.VideosAsync("p", null, 8, null, null, null, null, CancellationToken.None));
 
         Assert.Contains("expired", ex.Message);
         Assert.Contains("req-123", ex.Message);
@@ -536,7 +608,7 @@ public class GrokClientTests
         handler.EnqueueJson(HttpStatusCode.OK, "{}");
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            client.VideosAsync("p", null, 8, null, null, null, CancellationToken.None));
+            client.VideosAsync("p", null, 8, null, null, null, null, CancellationToken.None));
 
         Assert.Contains("request_id", ex.Message);
     }
@@ -553,7 +625,7 @@ public class GrokClientTests
             """{"status":"done","video":{"url":"https://cdn.example.test/v.mp4","duration":2}}""");
         handler.EnqueueBytes(HttpStatusCode.OK, new byte[] { 9 });
 
-        var result = await client.VideosAsync("p", null, 8, null, null, null, CancellationToken.None);
+        var result = await client.VideosAsync("p", null, 8, null, null, null, null, CancellationToken.None);
 
         Assert.Equal(new byte[] { 9 }, result.Bytes);
         Assert.Equal(4, handler.Requests.Count);
@@ -569,7 +641,7 @@ public class GrokClientTests
         handler.EnqueueJson(HttpStatusCode.OK, SuccessVideoStartJson);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            client.VideosAsync("p", null, 8, null, null, null, CancellationToken.None));
+            client.VideosAsync("p", null, 8, null, null, null, null, CancellationToken.None));
 
         Assert.Contains("timed out", ex.Message);
         Assert.Contains("req-123", ex.Message);

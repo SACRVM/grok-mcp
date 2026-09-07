@@ -120,6 +120,19 @@ public class GrokToolsTests : IDisposable
     }
 
     [Fact]
+    public async Task GrokEditImage_more_than_five_images_returns_error()
+    {
+        var images = new[]
+        {
+            "https://example.com/1.jpg", "https://example.com/2.jpg", "https://example.com/3.jpg",
+            "https://example.com/4.jpg", "https://example.com/5.jpg", "https://example.com/6.jpg",
+        };
+        var result = await _tools.GrokEditImage("p", images, Path.Combine(_tmp, "x.jpg"));
+        AssertError(result, "at most 5");
+        Assert.Empty(_handler.Requests);
+    }
+
+    [Fact]
     public async Task GrokDescribeImage_empty_prompt_returns_error()
     {
         var result = await _tools.GrokDescribeImage("", new[] { "https://example.com/a.jpg" });
@@ -161,6 +174,30 @@ public class GrokToolsTests : IDisposable
             Path.Combine(_tmp, "x.png"),
             resolution: "4k");
         AssertError(result, "resolution must be '1k' or '2k'");
+        Assert.Empty(_handler.Requests);
+    }
+
+    // 'high' is in xAI's schema but grok-imagine-image-2.0 rejects it with HTTP 400, so it is
+    // refused here alongside plain nonsense — before any credit is spent.
+    [Theory]
+    [InlineData("high")]
+    [InlineData("ultra")]
+    public async Task GrokGenerateImage_invalid_quality_returns_error(string quality)
+    {
+        var result = await _tools.GrokGenerateImage("p", Path.Combine(_tmp, "x.png"), quality: quality);
+        AssertError(result, "quality must be one of");
+        Assert.Empty(_handler.Requests);
+    }
+
+    [Fact]
+    public async Task GrokEditImage_invalid_quality_returns_error()
+    {
+        var result = await _tools.GrokEditImage(
+            "p",
+            new[] { "https://example.com/a.jpg" },
+            Path.Combine(_tmp, "x.png"),
+            quality: "high");
+        AssertError(result, "quality must be one of");
         Assert.Empty(_handler.Requests);
     }
 
@@ -267,15 +304,27 @@ public class GrokToolsTests : IDisposable
 
     // 'none' used to be the documented way to get a cheap non-reasoning answer, but the flagship
     // model rejects it with HTTP 400. grok_chat_fast is the replacement; fail before spending a call.
-    [Theory]
-    [InlineData("none")]
-    [InlineData("xhigh")]
-    public async Task GrokChat_rejects_efforts_the_flagship_model_cannot_serve(string effort)
+    [Fact]
+    public async Task GrokChat_rejects_none_which_the_flagship_model_cannot_serve()
     {
-        var result = await _tools.GrokChat("hi", reasoning_effort: effort);
+        var result = await _tools.GrokChat("hi", reasoning_effort: "none");
 
         AssertError(result, "reasoning_effort must be one of");
         Assert.Empty(_handler.Requests);
+    }
+
+    // grok-4.6 accepts 'xhigh' as plain deeper reasoning; 1.2.0 refused it because back then the
+    // value only existed on the multi-agent model.
+    [Fact]
+    public async Task GrokChat_reasoning_effort_xhigh_is_accepted_and_serialized()
+    {
+        _handler.EnqueueJson(HttpStatusCode.OK, SuccessChatJson);
+
+        var result = await _tools.GrokChat("hi", reasoning_effort: "xhigh");
+
+        Assert.False(result.IsError ?? false);
+        var req = Assert.Single(_handler.Requests);
+        Assert.Contains("\"reasoning_effort\":\"xhigh\"", req.Body);
     }
 
     [Fact]
@@ -306,8 +355,10 @@ public class GrokToolsTests : IDisposable
         Assert.Equal("answer", snap[1].Content);
     }
 
+    // xAI's table for this model: low/medium = 4 agents, high/xhigh = 16. 1.2.0 sent 'high' for 4
+    // and silently paid for 16 — the API accepts any effort value — so the mapping is pinned here.
     [Theory]
-    [InlineData(4, "high")]
+    [InlineData(4, "medium")]
     [InlineData(16, "xhigh")]
     public async Task GrokChatMultiAgent_maps_agent_count_onto_reasoning_effort(int agents, string expectedEffort)
     {
@@ -320,7 +371,9 @@ public class GrokToolsTests : IDisposable
         Assert.Equal("team answer", text.Text);
 
         var req = Assert.Single(_handler.Requests);
-        Assert.Contains($"\"reasoning_effort\":\"{expectedEffort}\"", req.Body);
+        // /responses wants the nested object; the flat field is only a fallback there.
+        Assert.Contains($"\"reasoning\":{{\"effort\":\"{expectedEffort}\"}}", req.Body);
+        Assert.DoesNotContain("reasoning_effort", req.Body);
         Assert.Contains("\"model\":\"test-multi-agent\"", req.Body);
     }
 
@@ -366,6 +419,21 @@ public class GrokToolsTests : IDisposable
         Assert.Contains(outPath, text.Text);
         Assert.Contains("4s", text.Text);
         Assert.True(File.Exists(outPath));
+        // The tool states the audio choice explicitly (default true) instead of relying on xAI's default.
+        Assert.Contains("\"generate_audio\":true", _handler.Requests[0].Body);
+    }
+
+    [Fact]
+    public async Task GrokGenerateVideo_generate_audio_false_is_serialized()
+    {
+        _handler.EnqueueJson(HttpStatusCode.OK, """{"request_id":"req-xyz"}""");
+        _handler.EnqueueJson(HttpStatusCode.OK,
+            """{"status":"done","video":{"url":"https://cdn.example.test/v.mp4","duration":1}}""");
+        _handler.EnqueueBytes(HttpStatusCode.OK, new byte[] { 0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70 });
+
+        await _tools.GrokGenerateVideo("p", Path.Combine(_tmp, "silent.mp4"), duration: 1, generate_audio: false);
+
+        Assert.Contains("\"generate_audio\":false", _handler.Requests[0].Body);
     }
 
     [Fact]

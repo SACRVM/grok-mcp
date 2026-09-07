@@ -4,6 +4,46 @@ All notable changes to grok-mcp are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] - 2026-09-07
+
+Catch-up with xAI's summer releases, plus one correction that was costing
+money: the 4-agent setting of `grok_chat_multi_agent` had been running 16
+agents all along.
+
+### Added
+- `quality` on `grok_generate_image` / `grok_edit_image` (`low`, `medium`,
+  `auto`) — honoured by the new default image model only.
+- `generate_audio` on `grok_generate_video` (default `true`, xAI's default);
+  pass `false` for a silent clip.
+- `reasoning_effort="xhigh"` on `grok_chat` — the new flagship supports it.
+- `grok_edit_image` accepts up to 5 source images (xAI raised the limit from
+  3), and both image tools take the new `21:9` / `5:2` aspect ratios.
+- Image calls log the model xAI reports as having served the request and the
+  exact cost, next to the token line chat calls already had.
+
+### Changed
+- **Default chat/vision model is now `grok-4.6`** (was `grok-4.5`): xAI's
+  recommended flagship since 2026-08-12, same input/output price, 500k context,
+  `xhigh` available. `grok-4.5` stays selectable via `model`.
+- **Default image model is now `grok-imagine-image-2.0`** (was
+  `grok-imagine-image`): the model xAI recommends and the only one with a
+  `quality` control. The older model remains selectable via `model` or
+  `GROK_MCP_IMAGE_MODEL`.
+- **Video runs on `grok-imagine-video-1.5` for both text-to-video and
+  image-to-video.** The per-mode auto-select is gone: xAI added text-to-video
+  to 1.5 on 2026-07-31, and 1.5 is the only model with 1080p.
+  `GROK_MCP_VIDEO_MODEL` now defaults to it instead of empty.
+- `grok_chat_multi_agent` sends the effort as the nested `reasoning.effort`
+  object xAI documents for `/responses` (the flat field was only a fallback).
+
+### Fixed
+- **`grok_chat_multi_agent(agents=4)` ran 16 agents.** xAI maps `low`/`medium`
+  to 4 agents and `high`/`xhigh` to 16; 1.2.0 sent `high` for 4. The API never
+  rejects an effort value, so nothing errored — the calls were just 2–4x more
+  expensive than advertised. `agents=4` now sends `medium`.
+- Tool descriptions and docs no longer recommend `grok-imagine-image-quality`,
+  which xAI retires on 2026-11-02.
+
 ## [1.2.0] - 2026-07-16
 
 Grok's chat surface is now one tool per intent instead of one tool with a
