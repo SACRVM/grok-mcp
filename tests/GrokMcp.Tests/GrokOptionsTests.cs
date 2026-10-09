@@ -69,8 +69,8 @@ public class GrokOptionsTests : IDisposable
     public void Model_defaults_match_the_release_contract()
     {
         var o = new GrokOptions();
-        Assert.Equal("grok-4.6", o.ChatModel);
-        Assert.Equal("grok-4.6", o.CreativeModel);
+        Assert.Equal("grok-4.7", o.ChatModel);
+        Assert.Equal("grok-4.7", o.CreativeModel);
         Assert.Equal("grok-4.20-0309-non-reasoning", o.FastModel);
         Assert.Equal("grok-4.20-multi-agent-0309", o.MultiAgentModel);
         Assert.Equal("grok-imagine-image-2.0", o.ImageModel);

@@ -17,7 +17,7 @@ below was observed, not assumed.
 | User wants a generated image (mockup, hero art, placeholder asset) | `grok_generate_image` | Claude cannot generate raster images. Grok can. |
 | User wants an existing image transformed (recolor, restyle, composite) | `grok_edit_image` | Same — image→image is impossible without an external model. |
 | User wants a short video clip (product demo, motion mockup, animated asset) | `grok_generate_video` | Claude cannot generate video either. Grok can, from text alone or from a seed image (image-to-video). Expect the call to block for minutes. |
-| User uploads a screenshot, diagram, or photo and asks what's in it (deep vision, not just OCR) | `grok_describe_image` | Defaults to `grok-4.6`, returns plain text — easy to chain. |
+| User uploads a screenshot, diagram, or photo and asks what's in it (deep vision, not just OCR) | `grok_describe_image` | Defaults to `grok-4.7`, returns plain text — easy to chain. |
 | User asks for a design / architecture review and Claude wrote the design | `grok_chat` with `reasoning_effort = "high"` | Independent second opinion. Grok has not seen the prior reasoning, so it pushes back instead of rationalising. |
 | Claude is uncertain about a fundamental technical claim and risks confabulating | `grok_chat` | Fact-check, devil's advocate, sycophancy-resistant sanity check. |
 | User has a long, throwaway processing task that would bloat Claude's context | `grok_chat` with a `session_id` | Offload to Grok's process memory, pull back only the conclusion. |
@@ -37,7 +37,7 @@ grok_generate_image(
   aspect_ratio = "1:1" | "3:4" | "4:3" | "9:16" | "16:9" | "2:3" | "3:2" |
                  "9:19.5" | "19.5:9" | "9:20" | "20:9" | "1:2" | "2:1" |
                  "21:9" | "5:2" | "auto",
-  resolution = "1k" | "2k",                            // optional — omit for xAI default
+  resolution = "1k" | "1.5k" | "2k",                   // optional — omit for xAI default
   quality = "low" | "medium" | "auto",                 // optional — omit for xAI default ("auto" = "low" for generation)
   n = 1                                                // up to 10
 )
@@ -60,7 +60,7 @@ grok_edit_image(
   images = ["C:\\absolute\\path\\to\\input.jpg"],     // 1-5 items; http(s) URL, path, data:, or raw base64
   output_path = "C:\\absolute\\path\\to\\output.jpg",
   aspect_ratio = "1:1",                                // same value list as grok_generate_image; "auto" follows image 1
-  resolution = "1k" | "2k",                            // optional — omit for xAI default
+  resolution = "1k" | "1.5k" | "2k",                   // optional — omit for xAI default
   quality = "low" | "medium" | "auto",                 // optional — omit for xAI default ("auto" = "medium" for edits)
   n = 1                                                // up to 4
 )
@@ -113,7 +113,7 @@ grok_chat(
 )
 ```
 
-`grok_chat` runs on `grok-4.6` — xAI's flagship: 500k context, function
+`grok_chat` runs on `grok-4.7` — xAI's flagship: 500k context, function
 calling, vision. It **always** reasons; there is no off switch (passing
 `reasoning_effort = "none"` is rejected before the call is made). Tune the
 depth:
@@ -124,6 +124,13 @@ depth:
   (architecture critique, tricky maths, sycophancy-resistant analysis).
 - `"xhigh"` — maximum depth, noticeably slower. For the rare problem where
   answer quality matters more than waiting for it.
+
+Expect long waits on long inputs. A 50–70 KB document can keep `grok-4.7`
+thinking for more than five minutes **even at `"low"`**. The call is not
+stuck: the server sends a progress notification every 20 s, which keeps
+Claude Code from aborting it, and waits up to an hour for xAI. Do not fall
+back to `grok_chat_fast` because a review is slow; that trades the review
+for a shallow one.
 
 For a genuinely fast answer, use the tool built for it:
 
@@ -358,7 +365,8 @@ the current process lifetime, not for persistence.
 ### Knowledge cutoff lags real time
 
 Grok's training cutoff lags real time by several months — `grok-4.6`'s is
-**1 February 2026**. Fundamentals are reliable, but for **current package
+**1 February 2026**, and xAI has not published one for `grok-4.7`.
+Fundamentals are reliable, but for **current package
 versions, newest API features, or month-old releases, verify against primary
 sources** rather than trusting Grok's recollection. (Historical: this footgun
 was first observed in a sycophancy-resistance test when the default was
@@ -498,25 +506,25 @@ unredacted customer data, or NDA-covered material into Grok prompts.
 
 ## Model & reasoning-effort cheat sheet
 
-Chat and vision run on `grok-4.6` (default). Whether Grok reasons is decided by
+Chat and vision run on `grok-4.7` (default). Whether Grok reasons is decided by
 **which tool you call**; `reasoning_effort` only tunes the depth once you are
 already on the reasoning model.
 
 | Task | Tool | `reasoning_effort` | Why |
 |---|---|---|---|
-| Quick fact, yes/no, short rephrase, classification | `grok_chat_fast` | n/a — the model cannot reason | Fastest and cheapest. `grok-4.6` would burn thinking tokens even on "2+2". |
+| Quick fact, yes/no, short rephrase, classification | `grok_chat_fast` | n/a — the model cannot reason | Fastest and cheapest. `grok-4.7` would burn thinking tokens even on "2+2". |
 | General chat, casual question | `grok_chat` | `"low"` | Baseline reasoning. |
 | Code review, technical critique | `grok_chat` | `"medium"` | Extra deliberation for non-trivial calls. |
 | Design review, architecture critique, hard reasoning | `grok_chat` | omit (xAI default `"high"`) | Deep reasoning — structured push-back. |
 | The one problem where quality beats latency | `grok_chat` | `"xhigh"` | Maximum depth, slowest. |
 | Problem worth an independent cross-check | `grok_chat_multi_agent` (`agents = 4` or `16`) | n/a — use `agents` | A team works it in parallel and reconciles. Slow, thousands of tokens of overhead. |
 | More than 500k context | `grok_chat` (`model="grok-4.3"`) | `"low"`–`"high"` | 1M context, weaker model. The only reason to override `model`. |
-| Vision (describe, OCR-like, diagram reading) | `grok_describe_image` | n/a | `grok-4.6` is the vision-capable model. |
+| Vision (describe, OCR-like, diagram reading) | `grok_describe_image` | n/a | `grok-4.7` is the vision-capable model. |
 | Image gen / edit | `grok_generate_image` / `grok_edit_image` | n/a | Default `grok-imagine-image-2.0`; `quality="medium"` for the best render, `model="grok-imagine-image"` for the cheap first-generation model. |
-| Video gen | `grok_generate_video` | n/a | `grok-imagine-video-1.5` for text-to-video and image-to-video, up to 1080p, audio track by default. |
+| Video gen | `grok_generate_video` | n/a | `grok-imagine-video-1.5` for text-to-video and image-to-video, up to 1080p, audio track by default. `model="grok-imagine-video-1.5-lite"` for cheap drafts (about a quarter of the price at 480p/720p). |
 
 Pass `reasoning_effort` per call rather than changing the server default. The
-server-side default is "let xAI decide" (`"high"` on `grok-4.6`).
+server-side default is "let xAI decide" (`"high"` on `grok-4.7`).
 
 **Gotcha:** `grok-4.20-multi-agent-0309` is *not* reachable through `grok_chat`
 even via `model` — xAI rejects it on `/chat/completions` with HTTP 400
@@ -529,7 +537,7 @@ worked.
 
 When you pass a `session_id`, the server attaches an `x-grok-conv-id` header
 so xAI routes the request to the same backend. Repeat-prefix tokens then bill
-at the **cached rate (`$0.50/M` input on `grok-4.6`, a quarter of normal)**
+at the **cached rate (`$0.50/M` input on `grok-4.7`, a quarter of normal)**
 instead of the full `$2.00/M`. Practical implication: long-lived
 `session_id`-chats with a shared system prompt and growing history are
 dramatically cheaper than stateless one-shots that re-send the same context

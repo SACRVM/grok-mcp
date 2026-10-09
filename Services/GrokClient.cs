@@ -424,6 +424,17 @@ public class GrokClient
                 response = await _http.SendAsync(request, ct);
                 responseBody = await response.Content.ReadAsStringAsync(ct);
             }
+            catch (TaskCanceledException ex) when (!ct.IsCancellationRequested && ex.InnerException is TimeoutException)
+            {
+                // HttpClient.Timeout elapsed. On a reasoning model that means xAI is still thinking,
+                // not that the network blipped: a retry restarts the same run from zero and bills it twice.
+                _log.LogWarning("Grok timeout after {Seconds}s (attempt {N}/{Max}, model={Model}), not retried",
+                    _http.Timeout.TotalSeconds, attempt, _retryDelays.Length, model);
+                throw new TimeoutException(
+                    $"xAI sent no answer within {_http.Timeout.TotalSeconds:0}s (model={model}). Not retried, because a " +
+                    "retry would restart the same reasoning from scratch. Raise GROK_MCP_HTTP_TIMEOUT_SEC if calls this long are expected.",
+                    ex);
+            }
             catch (Exception ex) when (ex is HttpRequestException || ex is TaskCanceledException)
             {
                 if (ct.IsCancellationRequested) throw;

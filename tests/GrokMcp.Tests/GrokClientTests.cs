@@ -12,10 +12,11 @@ public class GrokClientTests
 {
     private const string ApiBase = "https://api.example.test/v1";
 
-    private static (GrokClient Client, FakeHttpMessageHandler Handler) Build(string videoModel = "")
+    private static (GrokClient Client, FakeHttpMessageHandler Handler) Build(string videoModel = "", TimeSpan? httpTimeout = null)
     {
         var handler = new FakeHttpMessageHandler();
         var http = new HttpClient(handler);
+        if (httpTimeout is { } timeout) http.Timeout = timeout;
         var opts = Options.Create(new GrokOptions
         {
             ApiKey = "test-key",
@@ -133,6 +134,23 @@ public class GrokClientTests
 
         Assert.Equal("hello back", result.Content);
         Assert.Equal(2, handler.Requests.Count);
+    }
+
+    // HttpClient.Timeout on a reasoning model means xAI is still thinking. Retrying would start
+    // the same run from zero and bill it twice, so the first timeout is final.
+    [Fact]
+    public async Task ChatAsync_http_timeout_is_not_retried()
+    {
+        var (client, handler) = Build(httpTimeout: TimeSpan.FromMilliseconds(50));
+        handler.EnqueueDelayedJson(TimeSpan.FromSeconds(5), HttpStatusCode.OK, SuccessChatJson);
+        handler.EnqueueJson(HttpStatusCode.OK, SuccessChatJson);
+
+        var ex = await Assert.ThrowsAsync<TimeoutException>(() => client.ChatAsync(
+            new object[] { new { role = "user", content = "hi" } },
+            null, 0.7f, null, null, CancellationToken.None));
+
+        Assert.Contains("GROK_MCP_HTTP_TIMEOUT_SEC", ex.Message);
+        Assert.Single(handler.Requests);
     }
 
     [Fact]

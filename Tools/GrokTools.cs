@@ -3,6 +3,7 @@ using GrokMcp.Config;
 using GrokMcp.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
@@ -17,6 +18,11 @@ public class GrokTools
     private readonly ImageWriter _imgWriter;
     private readonly GrokOptions _opts;
     private readonly ILogger<GrokTools> _log;
+
+    // Claude Code aborts a tool call that sends neither a result nor a progress notification for
+    // 300 s. xAI sends nothing until a reasoning run is done, and a long document routinely thinks
+    // past that, so every xAI-bound call reports a heartbeat. Internal so tests can shrink it.
+    internal TimeSpan _heartbeatInterval = TimeSpan.FromSeconds(20);
 
     public GrokTools(
         GrokClient grok,
@@ -35,7 +41,7 @@ public class GrokTools
     }
 
     [McpServerTool(Name = "grok_chat"), Description(
-        "Send a chat completion to xAI Grok's flagship model (grok-4.6: 500k context, vision, function calling). " +
+        "Send a chat completion to xAI Grok's flagship model (grok-4.7: 500k context, vision, function calling). " +
         "This model always reasons before answering and cannot be told not to — for a fast non-reasoning answer " +
         "call grok_chat_fast instead, and for a hard problem worth a team of agents call grok_chat_multi_agent. " +
         "Stateless by default. Pass session_id to enable an in-memory thread that persists for the lifetime of " +
@@ -44,11 +50,12 @@ public class GrokTools
     public async Task<CallToolResult> GrokChat(
         [Description("User message (required).")] string message,
         [Description("Optional system prompt prepended to the conversation. On a session, replaces any prior system prompt.")] string? system = null,
-        [Description("Model override. Defaults to grok-4.6. Pass grok-4.3 when you need more than 500k context (it has 1M, at the cost of a weaker model), or grok-4.5 for the previous flagship.")] string? model = null,
+        [Description("Model override. Defaults to grok-4.7. Pass grok-4.3 when you need more than 500k context (it has 1M, at the cost of a weaker model), or grok-4.6 / grok-4.5 for the previous flagships.")] string? model = null,
         [Description("Sampling temperature 0.0-2.0. Default 0.7.")] float temperature = 0.7f,
-        [Description("Optional session id. Same id reuses in-memory chat history within this server process. Omit for stateless one-shot. When set, also routes to the same xAI server for prompt-prefix caching (cached input is billed at a quarter of normal on grok-4.6).")] string? session_id = null,
+        [Description("Optional session id. Same id reuses in-memory chat history within this server process. Omit for stateless one-shot. When set, also routes to the same xAI server for prompt-prefix caching (cached input is billed at a quarter of normal on grok-4.7).")] string? session_id = null,
         [Description("If true, clears the named session before this turn. No effect when session_id is null.")] bool reset_session = false,
-        [Description("Reasoning depth: 'low', 'medium', 'high' or 'xhigh'. Omit to let xAI default apply (grok-4.6 defaults to 'high'). 'xhigh' is the deepest setting, for problems where answer quality matters more than latency. Reasoning cannot be switched off here — that is what grok_chat_fast is for.")] string? reasoning_effort = null,
+        [Description("Reasoning depth: 'low', 'medium', 'high' or 'xhigh'. Omit to let xAI default apply (grok-4.7 defaults to 'high'). 'xhigh' is the deepest setting, for problems where answer quality matters more than latency. Reasoning cannot be switched off here — that is what grok_chat_fast is for.")] string? reasoning_effort = null,
+        IProgress<ProgressNotificationValue>? progress = null,
         CancellationToken ct = default)
     {
         if (!string.IsNullOrWhiteSpace(reasoning_effort) &&
@@ -59,7 +66,7 @@ public class GrokTools
         return await RunChatAsync("grok_chat", message, system, session_id, reset_session,
             (messages, conversationId, token) =>
                 _grok.ChatAsync(messages, model, temperature, reasoning_effort, conversationId, token),
-            ct);
+            progress, ct);
     }
 
     [McpServerTool(Name = "grok_chat_fast"), Description(
@@ -74,11 +81,12 @@ public class GrokTools
         [Description("Sampling temperature 0.0-2.0. Default 0.7.")] float temperature = 0.7f,
         [Description("Optional session id. Same id reuses in-memory chat history within this server process. Omit for stateless one-shot.")] string? session_id = null,
         [Description("If true, clears the named session before this turn. No effect when session_id is null.")] bool reset_session = false,
+        IProgress<ProgressNotificationValue>? progress = null,
         CancellationToken ct = default)
         => await RunChatAsync("grok_chat_fast", message, system, session_id, reset_session,
             (messages, conversationId, token) =>
                 _grok.ChatAsync(messages, _opts.FastModel, temperature, reasoningEffort: null, conversationId, token),
-            ct);
+            progress, ct);
 
     [McpServerTool(Name = "grok_chat_multi_agent"), Description(
         "Send a hard problem to Grok's multi-agent model (grok-4.20-multi-agent-0309), where a team of agents works " +
@@ -94,6 +102,7 @@ public class GrokTools
         [Description("Sampling temperature 0.0-2.0. Default 0.7.")] float temperature = 0.7f,
         [Description("Optional session id. Same id reuses in-memory chat history within this server process. Omit for stateless one-shot.")] string? session_id = null,
         [Description("If true, clears the named session before this turn. No effect when session_id is null.")] bool reset_session = false,
+        IProgress<ProgressNotificationValue>? progress = null,
         CancellationToken ct = default)
     {
         if (agents is not (4 or 16))
@@ -108,7 +117,7 @@ public class GrokTools
         return await RunChatAsync("grok_chat_multi_agent", message, system, session_id, reset_session,
             (messages, conversationId, token) =>
                 _grok.ResponsesAsync(messages, model: null, temperature, effort, conversationId, token),
-            ct);
+            progress, ct);
     }
 
     // The three chat tools differ only in which model/endpoint they hit; session assembly,
@@ -120,6 +129,7 @@ public class GrokTools
         string? session_id,
         bool reset_session,
         Func<List<object>, string?, CancellationToken, Task<GrokClient.ChatResult>> invoke,
+        IProgress<ProgressNotificationValue>? progress,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(message))
@@ -141,7 +151,7 @@ public class GrokTools
 
                 messages.Add(new { role = "user", content = message });
 
-                var result = await invoke(messages, session_id, ct);
+                var result = await WithHeartbeat(progress, () => invoke(messages, session_id, ct), ct);
 
                 _sessions.Append(session_id, new ChatTurn("user", message));
                 _sessions.Append(session_id, new ChatTurn("assistant", result.Content));
@@ -153,7 +163,7 @@ public class GrokTools
                 messages.Add(new { role = "system", content = system });
             messages.Add(new { role = "user", content = message });
 
-            var oneShot = await invoke(messages, null, ct);
+            var oneShot = await WithHeartbeat(progress, () => invoke(messages, null, ct), ct);
             return Text(oneShot.Content);
         }
         catch (Exception ex)
@@ -172,24 +182,26 @@ public class GrokTools
         [Description("Absolute filesystem path where the image is saved. Required. For n>1 the index is inserted before the extension. Parent directory will be created if missing.")] string output_path,
         [Description("Number of images. 1-10. Default 1.")] int n = 1,
         [Description("Aspect ratio. One of 1:1, 3:4, 4:3, 9:16, 16:9, 2:3, 3:2, 9:19.5, 19.5:9, 9:20, 20:9, 1:2, 2:1, 21:9, 5:2, or 'auto'. Default '1:1'.")] string aspect_ratio = "1:1",
-        [Description("Image resolution: '1k' or '2k'. Omit for xAI default.")] string? resolution = null,
+        [Description("Image resolution: '1k', '1.5k' or '2k'. Omit for xAI default.")] string? resolution = null,
         [Description("Render quality on grok-imagine-image-2.0: 'low', 'medium' or 'auto'. Omit for xAI default ('auto', which currently means 'low' for generation). 'medium' costs more per image. Ignored by the older grok-imagine-image model.")] string? quality = null,
         [Description("Model override. Defaults to grok-imagine-image-2.0. Pass grok-imagine-image for the cheaper first-generation model (no quality control).")] string? model = null,
         [Description("'b64_json' (default) or 'url'. The server fetches URL bytes either way.")] string response_format = "b64_json",
+        IProgress<ProgressNotificationValue>? progress = null,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(prompt))
             return Error("prompt must not be empty.");
         if (n < 1 || n > 10)
             return Error("n must be between 1 and 10.");
-        if (!string.IsNullOrWhiteSpace(resolution) && resolution is not ("1k" or "2k"))
-            return Error("resolution must be '1k' or '2k'.");
+        if (!string.IsNullOrWhiteSpace(resolution) && resolution is not ("1k" or "1.5k" or "2k"))
+            return Error("resolution must be one of: 1k, 1.5k, 2k.");
         if (!string.IsNullOrWhiteSpace(quality) && quality is not ("low" or "medium" or "auto"))
             return Error("quality must be one of: low, medium, auto.");
 
         try
         {
-            var bytesList = await _grok.ImagesAsync(prompt, model, n, aspect_ratio, resolution, quality, response_format, inputs: null, ct);
+            var bytesList = await WithHeartbeat(progress,
+                () => _grok.ImagesAsync(prompt, model, n, aspect_ratio, resolution, quality, response_format, inputs: null, ct), ct);
             return SaveAndPackage(output_path, bytesList);
         }
         catch (Exception ex)
@@ -210,10 +222,11 @@ public class GrokTools
         [Description("Absolute output path for the resulting image (required).")] string output_path,
         [Description("Number of result images. 1-4. Default 1.")] int n = 1,
         [Description("Aspect ratio. One of 1:1, 3:4, 4:3, 9:16, 16:9, 2:3, 3:2, 9:19.5, 19.5:9, 9:20, 20:9, 1:2, 2:1, 21:9, 5:2, or 'auto'. Default '1:1'. Pass 'auto' to follow the first input image.")] string aspect_ratio = "1:1",
-        [Description("Image resolution: '1k' or '2k'. Omit for xAI default.")] string? resolution = null,
+        [Description("Image resolution: '1k', '1.5k' or '2k'. Omit for xAI default.")] string? resolution = null,
         [Description("Render quality on grok-imagine-image-2.0: 'low', 'medium' or 'auto'. Omit for xAI default ('auto', which currently means 'medium' for edits). Ignored by the older grok-imagine-image model.")] string? quality = null,
         [Description("Model override. Defaults to grok-imagine-image-2.0. Pass grok-imagine-image for the cheaper first-generation model (no quality control).")] string? model = null,
         [Description("'b64_json' (default) or 'url'.")] string response_format = "b64_json",
+        IProgress<ProgressNotificationValue>? progress = null,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(prompt))
@@ -224,15 +237,16 @@ public class GrokTools
             return Error("images must contain at most 5 entries — xAI's limit for a single edit.");
         if (n < 1 || n > 4)
             return Error("n must be between 1 and 4 for edits.");
-        if (!string.IsNullOrWhiteSpace(resolution) && resolution is not ("1k" or "2k"))
-            return Error("resolution must be '1k' or '2k'.");
+        if (!string.IsNullOrWhiteSpace(resolution) && resolution is not ("1k" or "1.5k" or "2k"))
+            return Error("resolution must be one of: 1k, 1.5k, 2k.");
         if (!string.IsNullOrWhiteSpace(quality) && quality is not ("low" or "medium" or "auto"))
             return Error("quality must be one of: low, medium, auto.");
 
         try
         {
             var resolved = images.Select(_imgResolver.Resolve).ToList();
-            var bytesList = await _grok.ImagesAsync(prompt, model, n, aspect_ratio, resolution, quality, response_format, resolved, ct);
+            var bytesList = await WithHeartbeat(progress,
+                () => _grok.ImagesAsync(prompt, model, n, aspect_ratio, resolution, quality, response_format, resolved, ct), ct);
             return SaveAndPackage(output_path, bytesList);
         }
         catch (Exception ex)
@@ -249,9 +263,10 @@ public class GrokTools
     public async Task<CallToolResult> GrokDescribeImage(
         [Description("The question or instruction (e.g. 'Describe this image', 'Read the text', 'What style is this art in?'). Required.")] string prompt,
         [Description("One or more images to analyze. Required.")] string[] images,
-        [Description("Vision-capable model. Defaults to grok-4.6.")] string? model = null,
+        [Description("Vision-capable model. Defaults to grok-4.7.")] string? model = null,
         [Description("Detail level passed through to xAI ('low' | 'high' | 'auto'). Default 'auto'.")] string detail = "auto",
         [Description("Sampling temperature. Default 0.2 for descriptive accuracy.")] float temperature = 0.2f,
+        IProgress<ProgressNotificationValue>? progress = null,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(prompt))
@@ -262,7 +277,8 @@ public class GrokTools
         try
         {
             var resolved = images.Select(_imgResolver.Resolve).ToList();
-            var text = await _grok.VisionAsync(prompt, resolved, model, detail, temperature, ct);
+            var text = await WithHeartbeat(progress,
+                () => _grok.VisionAsync(prompt, resolved, model, detail, temperature, ct), ct);
             return Text(text);
         }
         catch (Exception ex)
@@ -284,9 +300,10 @@ public class GrokTools
         [Description("Video duration in seconds. 1-15. Default 8.")] int duration = 8,
         [Description("Aspect ratio. One of 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3. Default '16:9'.")] string aspect_ratio = "16:9",
         [Description("Resolution. One of '480p', '720p', '1080p'. Default '720p'. 1080p needs grok-imagine-video-1.5 (the default); the older grok-imagine-video tops out at 720p.")] string resolution = "720p",
-        [Description("Model override. Defaults to grok-imagine-video-1.5 for both text-to-video and image-to-video (native 1080p). Set GROK_MCP_VIDEO_MODEL in config.env to change the default.")] string? model = null,
+        [Description("Model override. Defaults to grok-imagine-video-1.5 for both text-to-video and image-to-video (native 1080p). Pass grok-imagine-video-1.5-lite for cheap drafts: same inputs and resolutions, about a quarter of the price at 480p/720p and about half at 1080p. Set GROK_MCP_VIDEO_MODEL in config.env to change the default.")] string? model = null,
         [Description("Optional starting image for image-to-video. Same resolution rules as grok_edit_image: http(s) URL, absolute file path, data: URI, or raw base64.")] string? image = null,
         [Description("Whether the clip gets a generated audio track. Default true (xAI's default). Pass false for a silent video.")] bool generate_audio = true,
+        IProgress<ProgressNotificationValue>? progress = null,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(prompt))
@@ -305,7 +322,8 @@ public class GrokTools
         try
         {
             object? imageInput = string.IsNullOrWhiteSpace(image) ? null : _imgResolver.Resolve(image);
-            var result = await _grok.VideosAsync(prompt, model, duration, aspect_ratio, resolution, imageInput, generate_audio, ct);
+            var result = await WithHeartbeat(progress,
+                () => _grok.VideosAsync(prompt, model, duration, aspect_ratio, resolution, imageInput, generate_audio, ct), ct);
             var saved = _imgWriter.WriteVideo(output_path, result.Bytes);
 
             var summary = result.DurationSeconds is { } d
@@ -317,6 +335,41 @@ public class GrokTools
         {
             _log.LogError(ex, "grok_generate_video failed");
             return Error($"Video generation failed: {ex.Message}");
+        }
+    }
+
+    // Reports elapsed time every _heartbeatInterval while `work` runs. The SDK hands every tool a
+    // progress sink; it forwards to the client only when the request carried a progressToken.
+    private async Task<T> WithHeartbeat<T>(
+        IProgress<ProgressNotificationValue>? progress, Func<Task<T>> work, CancellationToken ct)
+    {
+        if (progress is null) return await work();
+
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var beat = Task.Run(async () =>
+        {
+            using var timer = new PeriodicTimer(_heartbeatInterval);
+            try
+            {
+                while (await timer.WaitForNextTickAsync(stop.Token))
+                    progress.Report(new ProgressNotificationValue
+                    {
+                        Progress = (float)clock.Elapsed.TotalSeconds,
+                        Message = $"Waiting for xAI ({clock.Elapsed.TotalSeconds:0}s)",
+                    });
+            }
+            catch (OperationCanceledException) { }
+        });
+
+        try
+        {
+            return await work();
+        }
+        finally
+        {
+            stop.Cancel();
+            await beat;
         }
     }
 

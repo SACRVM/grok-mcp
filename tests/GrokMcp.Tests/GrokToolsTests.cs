@@ -6,6 +6,7 @@ using GrokMcp.Tests.Fakes;
 using GrokMcp.Tools;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
 
 namespace GrokMcp.Tests;
@@ -161,7 +162,7 @@ public class GrokToolsTests : IDisposable
     public async Task GrokGenerateImage_invalid_resolution_returns_error()
     {
         var result = await _tools.GrokGenerateImage("p", Path.Combine(_tmp, "x.png"), resolution: "4k");
-        AssertError(result, "resolution must be '1k' or '2k'");
+        AssertError(result, "resolution must be one of: 1k, 1.5k, 2k");
         Assert.Empty(_handler.Requests);
     }
 
@@ -173,8 +174,40 @@ public class GrokToolsTests : IDisposable
             new[] { "https://example.com/a.jpg" },
             Path.Combine(_tmp, "x.png"),
             resolution: "4k");
-        AssertError(result, "resolution must be '1k' or '2k'");
+        AssertError(result, "resolution must be one of: 1k, 1.5k, 2k");
         Assert.Empty(_handler.Requests);
+    }
+
+    // grok-imagine-image-2.0 added '1.5k' (1408x1408 on 1:1) after the 1k/2k pair the
+    // validation was written for; it must reach xAI rather than be refused here.
+    [Fact]
+    public async Task GrokGenerateImage_resolution_1_5k_is_accepted_and_serialized()
+    {
+        var png = Convert.ToBase64String(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A });
+        _handler.EnqueueJson(HttpStatusCode.OK, $$"""{"data":[{"b64_json":"{{png}}"}]}""");
+
+        var result = await _tools.GrokGenerateImage("p", Path.Combine(_tmp, "x.png"), resolution: "1.5k");
+
+        Assert.False(result.IsError ?? false);
+        var req = Assert.Single(_handler.Requests);
+        Assert.Contains("\"resolution\":\"1.5k\"", req.Body);
+    }
+
+    [Fact]
+    public async Task GrokEditImage_resolution_1_5k_is_accepted_and_serialized()
+    {
+        var png = Convert.ToBase64String(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A });
+        _handler.EnqueueJson(HttpStatusCode.OK, $$"""{"data":[{"b64_json":"{{png}}"}]}""");
+
+        var result = await _tools.GrokEditImage(
+            "p",
+            new[] { "https://example.com/a.jpg" },
+            Path.Combine(_tmp, "x.png"),
+            resolution: "1.5k");
+
+        Assert.False(result.IsError ?? false);
+        var req = Assert.Single(_handler.Requests);
+        Assert.Contains("\"resolution\":\"1.5k\"", req.Body);
     }
 
     // 'high' is in xAI's schema but grok-imagine-image-2.0 rejects it with HTTP 400, so it is
@@ -247,6 +280,53 @@ public class GrokToolsTests : IDisposable
         Assert.Equal("answer", text.Text);
     }
 
+    // Claude Code drops a tool call after 300 s without a result or progress notification, and a
+    // reasoning run on a long document can take longer than that. The heartbeat keeps it alive.
+    [Fact]
+    public async Task GrokChat_reports_increasing_progress_while_xai_is_thinking()
+    {
+        _tools._heartbeatInterval = TimeSpan.FromMilliseconds(20);
+        _handler.EnqueueDelayedJson(TimeSpan.FromMilliseconds(300), HttpStatusCode.OK, SuccessChatJson);
+        var progress = new RecordingProgress();
+
+        var result = await _tools.GrokChat("hi", progress: progress);
+
+        Assert.False(result.IsError ?? false);
+        var reports = progress.Snapshot();
+        Assert.True(reports.Count >= 2, $"expected at least two heartbeats, got {reports.Count}");
+        Assert.All(reports.Zip(reports.Skip(1)), pair => Assert.True(pair.Second.Progress > pair.First.Progress));
+        Assert.All(reports, r => Assert.StartsWith("Waiting for xAI", r.Message));
+    }
+
+    [Fact]
+    public async Task GrokChat_stops_reporting_progress_once_the_answer_is_in()
+    {
+        _tools._heartbeatInterval = TimeSpan.FromMilliseconds(20);
+        _handler.EnqueueJson(HttpStatusCode.OK, SuccessChatJson);
+        var progress = new RecordingProgress();
+
+        await _tools.GrokChat("hi", progress: progress);
+        var countAtReturn = progress.Snapshot().Count;
+        await Task.Delay(150);
+
+        Assert.Equal(countAtReturn, progress.Snapshot().Count);
+    }
+
+    private sealed class RecordingProgress : IProgress<ProgressNotificationValue>
+    {
+        private readonly List<ProgressNotificationValue> _reports = new();
+
+        public void Report(ProgressNotificationValue value)
+        {
+            lock (_reports) _reports.Add(value);
+        }
+
+        public List<ProgressNotificationValue> Snapshot()
+        {
+            lock (_reports) return _reports.ToList();
+        }
+    }
+
     [Fact]
     public async Task GrokChat_with_session_id_appends_user_and_assistant_turns()
     {
@@ -313,7 +393,7 @@ public class GrokToolsTests : IDisposable
         Assert.Empty(_handler.Requests);
     }
 
-    // grok-4.6 accepts 'xhigh' as plain deeper reasoning; 1.2.0 refused it because back then the
+    // The flagship (4.6 and 4.7) accepts 'xhigh' as plain deeper reasoning; 1.2.0 refused it because back then the
     // value only existed on the multi-agent model.
     [Fact]
     public async Task GrokChat_reasoning_effort_xhigh_is_accepted_and_serialized()

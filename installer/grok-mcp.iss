@@ -204,8 +204,8 @@ begin
     'XAI_API_KEY=' + newKey + nl +
     nl +
     '# Optional model overrides (defaults shown):' + nl +
-    '# GROK_MCP_CHAT_MODEL=grok-4.6' + nl +
-    '# GROK_MCP_CREATIVE_MODEL=grok-4.6' + nl +
+    '# GROK_MCP_CHAT_MODEL=grok-4.7' + nl +
+    '# GROK_MCP_CREATIVE_MODEL=grok-4.7' + nl +
     '# grok_chat_fast needs a model that cannot reason:' + nl +
     '# GROK_MCP_FAST_MODEL=grok-4.20-0309-non-reasoning' + nl +
     '# GROK_MCP_MULTI_AGENT_MODEL=grok-4.20-multi-agent-0309' + nl +
@@ -215,7 +215,7 @@ begin
     nl +
     '# Optional runtime tuning:' + nl +
     '# GROK_MCP_LOG_LEVEL=Information' + nl +
-    '# GROK_MCP_HTTP_TIMEOUT_SEC=300' + nl +
+    '# GROK_MCP_HTTP_TIMEOUT_SEC=3600' + nl +
     '# GROK_MCP_SESSION_CAP=50' + nl;
   SaveStringToFile(ConfigEnvPath(), body, False);
 end;

@@ -8,7 +8,7 @@ namespace GrokMcp.Tests.Fakes;
 // and inspect what requests were made.
 internal sealed class FakeHttpMessageHandler : HttpMessageHandler
 {
-    private readonly Queue<Func<HttpRequestMessage, HttpResponseMessage>> _responders = new();
+    private readonly Queue<Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>> _responders = new();
 
     public List<Recorded> Requests { get; } = new();
 
@@ -16,31 +16,45 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
 
     public void EnqueueJson(HttpStatusCode status, string body)
     {
-        _responders.Enqueue(_ => new HttpResponseMessage(status)
+        _responders.Enqueue((_, _) => Task.FromResult(new HttpResponseMessage(status)
         {
             Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json"),
+        }));
+    }
+
+    // Answers only after `delay`, honouring cancellation, so a test can trip HttpClient.Timeout
+    // or keep a tool busy long enough for its progress heartbeat to fire.
+    public void EnqueueDelayedJson(TimeSpan delay, HttpStatusCode status, string body)
+    {
+        _responders.Enqueue(async (_, ct) =>
+        {
+            await Task.Delay(delay, ct);
+            return new HttpResponseMessage(status)
+            {
+                Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json"),
+            };
         });
     }
 
     public void EnqueueStatus(HttpStatusCode status, string body = "")
     {
-        _responders.Enqueue(_ => new HttpResponseMessage(status)
+        _responders.Enqueue((_, _) => Task.FromResult(new HttpResponseMessage(status)
         {
             Content = new StringContent(body),
-        });
+        }));
     }
 
     public void EnqueueBytes(HttpStatusCode status, byte[] bytes)
     {
-        _responders.Enqueue(_ => new HttpResponseMessage(status)
+        _responders.Enqueue((_, _) => Task.FromResult(new HttpResponseMessage(status)
         {
             Content = new ByteArrayContent(bytes),
-        });
+        }));
     }
 
     public void EnqueueException(Exception ex)
     {
-        _responders.Enqueue(_ => throw ex);
+        _responders.Enqueue((_, _) => throw ex);
     }
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
@@ -52,6 +66,6 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
             throw new InvalidOperationException(
                 $"FakeHttpMessageHandler: no response queued for {request.Method} {request.RequestUri}");
 
-        return _responders.Dequeue().Invoke(request);
+        return await _responders.Dequeue().Invoke(request, ct);
     }
 }

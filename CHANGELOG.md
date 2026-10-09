@@ -4,11 +4,11 @@ All notable changes to grok-mcp are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [1.3.0] - 2026-09-07
+## [1.3.0] - 2026-10-09
 
-Catch-up with xAI's summer releases, plus one correction that was costing
-money: the 4-agent setting of `grok_chat_multi_agent` had been running 16
-agents all along.
+Catch-up with xAI's summer and early-autumn releases, plus two fixes: long
+reasoning calls no longer die after five minutes, and the 4-agent setting of
+`grok_chat_multi_agent` no longer runs 16 agents.
 
 ### Added
 - `quality` on `grok_generate_image` / `grok_edit_image` (`low`, `medium`,
@@ -18,13 +18,16 @@ agents all along.
 - `reasoning_effort="xhigh"` on `grok_chat` — the new flagship supports it.
 - `grok_edit_image` accepts up to 5 source images (xAI raised the limit from
   3), and both image tools take the new `21:9` / `5:2` aspect ratios.
+- `resolution="1.5k"` on both image tools, between the existing `1k` and `2k`.
+- `grok_generate_video` points to `grok-imagine-video-1.5-lite` (via `model`)
+  for cheap drafts — about a quarter of the price at 480p/720p.
 - Image calls log the model xAI reports as having served the request and the
   exact cost, next to the token line chat calls already had.
 
 ### Changed
-- **Default chat/vision model is now `grok-4.6`** (was `grok-4.5`): xAI's
-  recommended flagship since 2026-08-12, same input/output price, 500k context,
-  `xhigh` available. `grok-4.5` stays selectable via `model`.
+- **Default chat/vision model is now `grok-4.7`** (was `grok-4.5`): xAI's
+  newest flagship, same input/output price, 500k context, `xhigh` available.
+  `grok-4.6` and `grok-4.5` stay selectable via `model`.
 - **Default image model is now `grok-imagine-image-2.0`** (was
   `grok-imagine-image`): the model xAI recommends and the only one with a
   `quality` control. The older model remains selectable via `model` or
@@ -37,6 +40,14 @@ agents all along.
   object xAI documents for `/responses` (the flat field was only a fallback).
 
 ### Fixed
+- **Long Grok calls died after five minutes.** Claude Code drops a tool call
+  that sends neither a result nor a progress notification for 300 s, and
+  grok-mcp's own HTTP timeout to xAI was also 300 s, after which it restarted
+  the same reasoning run from scratch. Reviews of long documents hit both,
+  even at `reasoning_effort="low"`. Every tool now sends a progress
+  notification every 20 s while xAI works, the xAI timeout defaults to
+  3600 s (what xAI's own reasoning examples use), and a timeout is reported
+  instead of retried.
 - **`grok_chat_multi_agent(agents=4)` ran 16 agents.** xAI maps `low`/`medium`
   to 4 agents and `high`/`xhigh` to 16; 1.2.0 sent `high` for 4. The API never
   rejects an effort value, so nothing errored — the calls were just 2–4x more
