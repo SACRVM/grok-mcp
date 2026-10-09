@@ -10,7 +10,7 @@
 ;   - bin/installer/GrokMcpSetup-<version>-win-x64.exe
 
 #ifndef AppVersion
-  #define AppVersion "1.2.0"
+  #define AppVersion "1.3.0"
 #endif
 
 #define TaskName "grok-mcp-server"

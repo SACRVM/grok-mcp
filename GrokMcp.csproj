@@ -9,7 +9,7 @@
     <AssemblyName>grok-mcp</AssemblyName>
     <InvariantGlobalization>true</InvariantGlobalization>
     <LangVersion>latest</LangVersion>
-    <Version>1.2.0</Version>
+    <Version>1.3.0</Version>
 
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>false</SelfContained>
