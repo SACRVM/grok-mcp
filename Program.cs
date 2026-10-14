@@ -33,7 +33,7 @@ try
 
     if (string.IsNullOrWhiteSpace(bootOpts.ApiKey))
     {
-        const string fatal = "FATAL: XAI_API_KEY is missing. Set it in %LOCALAPPDATA%\\grok-mcp\\config.env or %USERPROFILE%\\.grok-mcp\\config.env.";
+        var fatal = $"FATAL: XAI_API_KEY is missing. Set it in {string.Join(" or ", GrokOptions.ConfigFilePaths())}.";
         await Console.Error.WriteLineAsync(fatal);
         // WinExe subsystem detaches stderr when not redirected — also persist to file
         // so a user staring at a flapping Scheduled Task can find the reason in the logs.

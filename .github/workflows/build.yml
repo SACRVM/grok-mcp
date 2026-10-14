@@ -45,3 +45,35 @@ jobs:
             Get-Content stderr.log
             throw "Expected exit code 2 (missing XAI_API_KEY), got $($proc.ExitCode)."
           }
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+          cache: true
+          cache-dependency-path: "**/*.csproj"
+
+      - name: dotnet test
+        run: dotnet test tests/GrokMcp.Tests/GrokMcp.Tests.csproj -c Release --logger "console;verbosity=normal"
+
+      - name: dotnet publish
+        run: dotnet publish GrokMcp.csproj -c Release -o bin/linux
+
+      - name: Boot smoke (missing key must exit 2)
+        run: |
+          # Empty HOME so no config.env from the runner can supply a key.
+          code=0
+          env -u XDG_CONFIG_HOME -u XDG_DATA_HOME HOME="$(mktemp -d)" XAI_API_KEY= \
+            timeout 5 bin/linux/grok-mcp || code=$?
+          if [ "$code" -ne 2 ]; then
+            echo "Expected exit code 2 (missing XAI_API_KEY), got $code."
+            exit 1
+          fi
+
+      - name: Install script syntax
+        run: bash -n scripts/install-linux.sh

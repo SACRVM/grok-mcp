@@ -24,6 +24,23 @@ public class GrokOptionsTests : IDisposable
     }
 
     [Fact]
+    public void ConfigFilePaths_put_the_platform_config_dir_first()
+    {
+        var paths = GrokOptions.ConfigFilePaths();
+        var first = OperatingSystem.IsWindows()
+            ? Environment.SpecialFolder.LocalApplicationData
+            : Environment.SpecialFolder.ApplicationData; // $XDG_CONFIG_HOME, ~/.config
+        Assert.Equal(Path.Combine(Folder(first), "grok-mcp", "config.env"), paths[0]);
+        Assert.Equal(Path.Combine(Folder(Environment.SpecialFolder.UserProfile), ".grok-mcp", "config.env"), paths[^1]);
+        Assert.Equal(OperatingSystem.IsWindows() ? 2 : 3, paths.Count);
+        // A relative candidate would be resolved against the server's CWD.
+        Assert.All(paths, p => Assert.True(Path.IsPathFullyQualified(p), p));
+
+        static string Folder(Environment.SpecialFolder f) =>
+            Environment.GetFolderPath(f, Environment.SpecialFolderOption.DoNotVerify);
+    }
+
+    [Fact]
     public void LoadEnvFile_missing_file_is_noop()
     {
         var missing = Path.Combine(_tmpDir, "absent.env");

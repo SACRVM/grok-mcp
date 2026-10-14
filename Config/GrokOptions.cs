@@ -28,17 +28,35 @@ public class GrokOptions
     public string LogDir { get; set; } = "";
     public string LogLevel { get; set; } = "Information";
 
+    // config.env candidates, highest priority first. Windows: %LOCALAPPDATA% > %USERPROFILE%.
+    // Elsewhere $XDG_CONFIG_HOME (~/.config, where scripts/install-linux.sh writes) comes first;
+    // .NET maps LocalApplicationData to ~/.local/share there.
+    internal static IReadOnlyList<string> ConfigFilePaths()
+    {
+        var paths = new List<string>();
+        if (!OperatingSystem.IsWindows())
+            Add(Environment.SpecialFolder.ApplicationData, "grok-mcp");
+        Add(Environment.SpecialFolder.LocalApplicationData, "grok-mcp");
+        Add(Environment.SpecialFolder.UserProfile, ".grok-mcp");
+        return paths;
+
+        // DoNotVerify: on Unix the default returns "" for a folder that doesn't exist yet (a fresh
+        // HOME has no ~/.config), and "" + "grok-mcp/config.env" is a path relative to the CWD.
+        void Add(Environment.SpecialFolder folder, string dir)
+        {
+            var root = Environment.GetFolderPath(folder, Environment.SpecialFolderOption.DoNotVerify);
+            if (!string.IsNullOrEmpty(root))
+                paths.Add(System.IO.Path.Combine(root, dir, "config.env"));
+        }
+    }
+
     public static void BindFromEnvironment(GrokOptions o)
     {
-        // Priority: real process env vars > %LOCALAPPDATA% > %USERPROFILE%. The loader only
-        // sets keys that aren't already present, so the second file can't overwrite the first
-        // and neither file can overwrite a real env var.
-        LoadEnvFile(System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "grok-mcp", "config.env"));
-        LoadEnvFile(System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".grok-mcp", "config.env"));
+        // Priority: real process env vars > config files in ConfigFilePaths() order. The loader
+        // only sets keys that aren't already present, so a later file can't overwrite an earlier
+        // one and no file can overwrite a real env var.
+        foreach (var path in ConfigFilePaths())
+            LoadEnvFile(path);
 
         o.ApiKey = Environment.GetEnvironmentVariable("XAI_API_KEY") ?? "";
         o.ChatModel = NonEmpty("GROK_MCP_CHAT_MODEL", o.ChatModel);
@@ -49,7 +67,8 @@ public class GrokOptions
         o.VideoModel = NonEmpty("GROK_MCP_VIDEO_MODEL", o.VideoModel);
         o.LogLevel = NonEmpty("GROK_MCP_LOG_LEVEL", o.LogLevel);
 
-        var localApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var localApp = Environment.GetFolderPath(
+            Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify);
         var defaultLogDir = string.IsNullOrEmpty(localApp)
             ? System.IO.Path.Combine(AppContext.BaseDirectory, "logs")
             : System.IO.Path.Combine(localApp, "grok-mcp", "logs");

@@ -35,13 +35,31 @@ Re-running the installer is safe: an existing `config.env` is preserved and the 
 
 Requires the .NET 10 Desktop Runtime (the installer doesn't bundle it; download from [microsoft.com/dotnet](https://dotnet.microsoft.com/download/dotnet/10.0) if missing).
 
+## Install (Linux)
+
+Builds from source, so it needs the .NET 10 SDK and the ASP.NET Core 10 runtime (Arch: `dotnet-sdk aspnet-runtime`; Debian/Ubuntu: `dotnet-sdk-10.0 aspnetcore-runtime-10.0`). From a clone:
+
+```bash
+scripts/install-linux.sh
+```
+
+The script is per-user, no sudo. It will:
+
+- Prompt for your `XAI_API_KEY` (hidden input) unless one is already configured, and write it to `~/.config/grok-mcp/config.env` (mode 600). Passing `XAI_API_KEY=… scripts/install-linux.sh` sets or replaces it without a prompt.
+- Publish to `~/.local/lib/grok-mcp/` and symlink `~/.local/bin/grok-mcp`.
+- Install and start the systemd user service `grok-mcp.service`: starts at login, restarts on crash, does not restart when the key is missing.
+- Wait for `/health`, then register the MCP with Claude Code (`user` scope). It finds the `claude` CLI on PATH, in `~/.local/bin`, or the copy the Claude desktop app ships.
+
+Re-running it is safe and is also how you update: an existing key is kept and the service restarts on the new build. `scripts/install-linux.sh --uninstall` removes the service, binary and Claude Code registration, and keeps `config.env` and the logs.
+
 ## Configuration
 
 The server reads `config.env` files at startup. Priority (highest wins):
 
 1. Real process environment variables.
-2. `%LOCALAPPDATA%\grok-mcp\config.env` — written by the installer.
-3. `%USERPROFILE%\.grok-mcp\config.env` — optional fallback (useful if you sync your home folder).
+2. Windows: `%LOCALAPPDATA%\grok-mcp\config.env` — written by the installer.
+   Linux: `~/.config/grok-mcp/config.env` (`$XDG_CONFIG_HOME`) — written by `install-linux.sh`, then `~/.local/share/grok-mcp/config.env`.
+3. `%USERPROFILE%\.grok-mcp\config.env` / `~/.grok-mcp/config.env` — optional fallback (useful if you sync your home folder).
 
 | Var | Default | Purpose |
 |---|---|---|
@@ -53,7 +71,7 @@ The server reads `config.env` files at startup. Priority (highest wins):
 | `GROK_MCP_IMAGE_MODEL` | `grok-imagine-image-2.0` | default image gen/edit model; the only one that honours `quality` |
 | `GROK_MCP_VIDEO_MODEL` | `grok-imagine-video-1.5` | default video model for text-to-video and image-to-video |
 | `GROK_MCP_LOG_LEVEL` | `Information` | `Trace`/`Debug`/`Information`/`Warning`/`Error` |
-| `GROK_MCP_LOG_DIR` | `%LOCALAPPDATA%\grok-mcp\logs` | rolling-file log directory |
+| `GROK_MCP_LOG_DIR` | `%LOCALAPPDATA%\grok-mcp\logs` (Linux: `~/.local/share/grok-mcp/logs`) | rolling-file log directory |
 | `GROK_MCP_HTTP_TIMEOUT_SEC` | `3600` | per-request timeout to xAI (xAI's own recommendation for reasoning models); a timed-out call is not retried |
 | `GROK_MCP_SESSION_CAP` | `50` | max turns retained per session |
 | `GROK_MCP_PORT` | `6677` | port the server binds on `127.0.0.1` |
@@ -68,6 +86,10 @@ Stop-ScheduledTask  -TaskName grok-mcp-server
 Start-ScheduledTask -TaskName grok-mcp-server
 ```
 
+```bash
+systemctl --user restart grok-mcp
+```
+
 ## Verify it's running
 
 ```powershell
@@ -75,7 +97,11 @@ Invoke-WebRequest http://127.0.0.1:6677/health
 # {"status":"ok","pid":12345,"version":"1.0.0.0"}
 ```
 
-If the probe fails, check today's log under `%LOCALAPPDATA%\grok-mcp\logs\`. Most common: missing `XAI_API_KEY` (server exits with exit code 2).
+```bash
+curl http://127.0.0.1:6677/health
+```
+
+If the probe fails, check today's log under `%LOCALAPPDATA%\grok-mcp\logs\` (Linux: `journalctl --user -u grok-mcp`). Most common: missing `XAI_API_KEY` (server exits with exit code 2).
 
 ## Build from source
 
@@ -98,6 +124,8 @@ powershell.exe -ExecutionPolicy Bypass -File scripts\dev-update.ps1
 ```
 
 The script stops the Scheduled Task, waits for the process to release `grok-mcp.exe`, `dotnet publish`-es straight into the install directory, and starts the task again. The end-to-end cycle is typically under 5 seconds.
+
+On Linux, re-run `scripts/install-linux.sh`: it publishes to a staging directory first, so the running server stays up until the restart.
 
 ## Tests
 
@@ -140,21 +168,21 @@ grok-mcp\
 ├── Tools\GrokTools.cs        (the 7 [McpServerTool] methods)
 ├── tests\GrokMcp.Tests\      (xUnit — services, GrokClient, GrokTools)
 ├── installer\                (Inno Setup script + companion PowerShell)
-└── scripts\                  (developer helpers — dev-update.ps1)
+└── scripts\                  (dev-update.ps1 hot reload; install-linux.sh for Linux)
 ```
 
 ## Logs
 
 Two sinks:
 
-- **stderr** — every level. The Scheduled Task captures this in Event Viewer if needed.
-- **rolling file** — `%LOCALAPPDATA%\grok-mcp\logs\grok-mcp-YYYY-MM-DD.log`.
+- **stderr** — every level. The Scheduled Task captures this in Event Viewer if needed; on Linux it goes to the journal (`journalctl --user -u grok-mcp -f`).
+- **rolling file** — `%LOCALAPPDATA%\grok-mcp\logs\grok-mcp-YYYY-MM-DD.log` (Linux: `~/.local/share/grok-mcp/logs/`).
 
 Each Grok call logs the model, attempt, payload size, prompt preview (≤100 chars), and on success the `usage` token counts.
 
 ## Troubleshooting
 
-- **`/mcp` shows red / disconnected.** First check `Invoke-WebRequest http://127.0.0.1:6677/health`. If that fails, the server isn't running — `Get-ScheduledTask -TaskName grok-mcp-server` should show `State: Ready` or `Running`. If `State: Disabled` or the task is missing, re-run the installer.
+- **`/mcp` shows red / disconnected.** First check `Invoke-WebRequest http://127.0.0.1:6677/health`. If that fails, the server isn't running — `Get-ScheduledTask -TaskName grok-mcp-server` should show `State: Ready` or `Running`. If `State: Disabled` or the task is missing, re-run the installer. On Linux: `systemctl --user status grok-mcp`, and re-run `scripts/install-linux.sh` if the unit is missing.
 - **`HTTP 400 model not found` from a tool call.** xAI deprecates legacy aliases periodically. Set `GROK_MCP_CHAT_MODEL` / `GROK_MCP_CREATIVE_MODEL` / `GROK_MCP_IMAGE_MODEL` / `GROK_MCP_VIDEO_MODEL` in `config.env` to the current model id from the xAI console and restart the task.
 - **`output_path must be absolute`.** Claude Code's working directory is not the server's working directory. Always pass a full path.
 - **Port 6677 already in use.** Set `GROK_MCP_PORT` in `config.env` to a free port (e.g. `GROK_MCP_PORT=6688`), bounce the task, and re-register the MCP URL with Claude Code (`claude mcp remove grok --scope user; claude mcp add grok --scope user --transport http http://127.0.0.1:6688/mcp`).

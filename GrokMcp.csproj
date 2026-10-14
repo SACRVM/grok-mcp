@@ -13,7 +13,11 @@
 
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>false</SelfContained>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!-- win-x64 is what the installer ships. Elsewhere build for the host so `dotnet run` and
+         scripts/install-linux.sh need no -r flag. The SDK's *portable* RID, because a distro-built
+         SDK reports its own (arch-x64, ...), for which no apphost pack exists. -->
+    <RuntimeIdentifier Condition="$([MSBuild]::IsOSPlatform('Windows'))">win-x64</RuntimeIdentifier>
+    <RuntimeIdentifier Condition="!$([MSBuild]::IsOSPlatform('Windows'))">$(NETCoreSdkPortableRuntimeIdentifier)</RuntimeIdentifier>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
 
     <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
@@ -38,6 +42,8 @@
          references this one, so that tree gets copied again on every build, nesting one level
          deeper each time until the copy fails with MSB3030. -->
     <Content Remove="tests\**" />
+    <!-- A local per-project MCP config, not part of the app; it would land in the install dir. -->
+    <Content Remove=".mcp.json" />
   </ItemGroup>
 
 </Project>

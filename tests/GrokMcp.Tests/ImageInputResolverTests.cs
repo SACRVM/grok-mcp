@@ -50,6 +50,24 @@ public class ImageInputResolverTests : IDisposable
         Assert.Equal($"data:image/png;base64,{b64}", _resolver.ResolveDataUri(b64));
     }
 
+    [Fact]
+    public void Raw_jpeg_base64_is_not_mistaken_for_a_unix_path()
+    {
+        // JPEG base64 starts with "/9j/", which Unix treats as a fully qualified path.
+        var b64 = Convert.ToBase64String(new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10 });
+        Assert.StartsWith("/9j/", b64);
+        Assert.Equal($"data:image/jpeg;base64,{b64}", _resolver.ResolveDataUri(b64));
+    }
+
+    [Fact]
+    public void Missing_unix_style_path_still_throws()
+    {
+        // Contains a '.', so it can never be base64; must stay a file-not-found error everywhere.
+        var fake = $"/no-such-dir-{Guid.NewGuid():N}/image.png";
+        if (!Path.IsPathFullyQualified(fake)) return; // not a path shape on Windows
+        Assert.Throws<FileNotFoundException>(() => _resolver.Resolve(fake));
+    }
+
     private string WriteTempFile(byte[] bytes, string ext)
     {
         var path = Path.Combine(Path.GetTempPath(), $"grok-mcp-test-{Guid.NewGuid():N}{ext}");

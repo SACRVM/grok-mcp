@@ -4,6 +4,27 @@ All notable changes to grok-mcp are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+grok-mcp now runs on Linux.
+
+### Added
+- `scripts/install-linux.sh`: builds from source and installs per-user, no
+  sudo — systemd user service (starts at login, restarts on crash), key in
+  `~/.config/grok-mcp/config.env`, user-scope registration with Claude Code.
+  Re-running it updates; `--uninstall` removes everything but config and logs.
+- On Linux the server also reads `~/.config/grok-mcp/config.env`
+  (`$XDG_CONFIG_HOME`), ahead of the existing two locations.
+- CI builds, tests and boot-checks on Linux as well.
+
+### Fixed
+- Raw JPEG base64 passed as an image input on Linux was rejected as a missing
+  file: it starts with `/9j/`, which Unix reads as an absolute path.
+- Raw base64 image inputs are now labelled with their real MIME type instead
+  of always `image/png`.
+- The missing-key error names the config paths of the platform it runs on.
+- A local `.mcp.json` in the repo is no longer copied into the publish output.
+
 ## [1.3.0] - 2026-10-09
 
 Catch-up with xAI's summer and early-autumn releases, plus two fixes: long
