@@ -18,6 +18,11 @@ grok-mcp now runs on Linux.
 - CI builds, tests and boot-checks on Linux as well.
 
 ### Fixed
+- On Linux the server exhausted `fs.inotify.max_user_watches` for the whole
+  desktop: ASP.NET Core's default `appsettings.json` reload watched the working
+  directory recursively, and the systemd unit starts in `$HOME` (one inotify
+  watch per subdirectory of the whole home). The content root is now the install
+  directory and the reload is off; the server holds no inotify watches at all.
 - Raw JPEG base64 passed as an image input on Linux was rejected as a missing
   file: it starts with `/9j/`, which Unix reads as an absolute path.
 - Raw base64 image inputs are now labelled with their real MIME type instead

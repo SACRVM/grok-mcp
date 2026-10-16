@@ -7,7 +7,16 @@ var startedAt = DateTime.UtcNow;
 
 try
 {
-    var builder = WebApplication.CreateBuilder(args);
+    // The default content root is the CWD, and the default appsettings.json reload watches it
+    // recursively. A systemd user unit starts in $HOME, and on Linux FileSystemWatcher takes one
+    // inotify watch per subdirectory: it ate the whole fs.inotify.max_user_watches budget (524288)
+    // and broke inotify for the rest of the desktop. grok-mcp reads config.env once at startup and
+    // ships no appsettings.json, so pin the root to the install dir and switch the reload off.
+    var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+    {
+        Args = [.. args, "--hostBuilder:reloadConfigOnChange=false"],
+        ContentRootPath = AppContext.BaseDirectory,
+    });
 
     builder.Services.Configure<GrokOptions>(GrokOptions.BindFromEnvironment);
 
