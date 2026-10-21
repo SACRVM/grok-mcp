@@ -18,6 +18,16 @@ grok-mcp now runs on Linux.
 - CI builds, tests and boot-checks on Linux as well.
 
 ### Fixed
+- A reasoning call whose run died at xAI, or whose connection was dropped on
+  the way, hung for the full hour with no answer: the request was not
+  streamed, so a dead call looked exactly like a long think, and the progress
+  heartbeat kept Claude Code waiting. Chat calls (`grok_chat`,
+  `grok_chat_fast`, `grok_describe_image`) now stream; grok-4.7 sends a
+  reasoning chunk every few seconds while it thinks, so a call that goes
+  silent for `GROK_MCP_STREAM_IDLE_SEC` (default 120) is aborted and retried.
+  All connections to xAI also carry TCP keepalive, so a dropped connection
+  on the non-streamed calls (multi-agent, images) fails within about 90 s
+  instead of after the hour.
 - On Linux the server exhausted `fs.inotify.max_user_watches` for the whole
   desktop: ASP.NET Core's default `appsettings.json` reload watched the working
   directory recursively, and the systemd unit starts in `$HOME` (one inotify

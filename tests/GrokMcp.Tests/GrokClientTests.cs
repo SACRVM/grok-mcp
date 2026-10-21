@@ -153,6 +153,136 @@ public class GrokClientTests
         Assert.Single(handler.Requests);
     }
 
+    // ----- Streamed chat completions -----
+
+    private static string Delta(string deltaJson) => $$"""{"choices":[{"index":0,"delta":{{deltaJson}}}]}""";
+
+    private static readonly string[] SuccessChatStream =
+    {
+        Delta("""{"reasoning_content":"thinking about it","role":"assistant"}"""),
+        Delta("""{"reasoning_content":" some more"}"""),
+        Delta("""{"content":"hello "}"""),
+        Delta("""{"content":"back"}"""),
+        """{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}""",
+        "[DONE]",
+    };
+
+    [Fact]
+    public async Task ChatAsync_streams_and_assembles_answer_without_reasoning()
+    {
+        var (client, handler) = Build();
+        handler.EnqueueSse(SuccessChatStream);
+
+        var result = await client.ChatAsync(
+            new object[] { new { role = "user", content = "hi" } },
+            null, 0.7f, null, null, CancellationToken.None);
+
+        Assert.Equal("hello back", result.Content);
+        Assert.Equal(10, result.PromptTokens);
+        Assert.Equal(5, result.CompletionTokens);
+        Assert.Equal(15, result.TotalTokens);
+        var req = Assert.Single(handler.Requests);
+        Assert.Contains("\"stream\":true", req.Body);
+        Assert.Contains("\"include_usage\":true", req.Body);
+    }
+
+    // A reasoning model ticks every few seconds; silence means the run or the connection is dead,
+    // and nothing will ever arrive on it. 1.3.0 waited out the full hour in exactly this state.
+    [Fact]
+    public async Task ChatAsync_silent_stream_is_retried()
+    {
+        var (client, handler) = Build();
+        client._streamIdleTimeout = TimeSpan.FromMilliseconds(100);
+        handler.EnqueueSse(new[] { Delta("""{"reasoning_content":"thinking"}""") }, stall: true);
+        handler.EnqueueSse(SuccessChatStream);
+
+        var result = await client.ChatAsync(
+            new object[] { new { role = "user", content = "hi" } },
+            null, 0.7f, null, null, CancellationToken.None);
+
+        Assert.Equal("hello back", result.Content);
+        Assert.Equal(2, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task ChatAsync_silent_stream_on_every_attempt_fails_naming_the_idle_setting()
+    {
+        var (client, handler) = Build();
+        client._streamIdleTimeout = TimeSpan.FromMilliseconds(100);
+        for (var i = 0; i < 3; i++)
+            handler.EnqueueSse(Array.Empty<string>(), stall: true);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => client.ChatAsync(
+            new object[] { new { role = "user", content = "hi" } },
+            null, 0.7f, null, null, CancellationToken.None));
+
+        Assert.Contains("GROK_MCP_STREAM_IDLE_SEC", ex.Message);
+        Assert.Equal(3, handler.Requests.Count);
+    }
+
+    // The overall HTTP timeout still caps a stream and is still final, ticking or not.
+    [Fact]
+    public async Task ChatAsync_stream_past_the_http_timeout_is_not_retried()
+    {
+        var (client, handler) = Build(httpTimeout: TimeSpan.FromMilliseconds(150));
+        client._streamIdleTimeout = TimeSpan.FromSeconds(30);
+        handler.EnqueueSse(new[] { Delta("""{"reasoning_content":"thinking"}""") }, stall: true);
+        handler.EnqueueSse(SuccessChatStream);
+
+        var ex = await Assert.ThrowsAsync<TimeoutException>(() => client.ChatAsync(
+            new object[] { new { role = "user", content = "hi" } },
+            null, 0.7f, null, null, CancellationToken.None));
+
+        Assert.Contains("GROK_MCP_HTTP_TIMEOUT_SEC", ex.Message);
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task ChatAsync_stream_closed_before_done_is_retried()
+    {
+        var (client, handler) = Build();
+        handler.EnqueueSse(new[] { Delta("""{"content":"hel"}""") });
+        handler.EnqueueSse(SuccessChatStream);
+
+        var result = await client.ChatAsync(
+            new object[] { new { role = "user", content = "hi" } },
+            null, 0.7f, null, null, CancellationToken.None);
+
+        Assert.Equal("hello back", result.Content);
+        Assert.Equal(2, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task ChatAsync_error_event_in_stream_is_retried()
+    {
+        var (client, handler) = Build();
+        handler.EnqueueSse(new[] { """{"error":{"message":"overloaded"}}""" });
+        handler.EnqueueSse(SuccessChatStream);
+
+        var result = await client.ChatAsync(
+            new object[] { new { role = "user", content = "hi" } },
+            null, 0.7f, null, null, CancellationToken.None);
+
+        Assert.Equal("hello back", result.Content);
+        Assert.Equal(2, handler.Requests.Count);
+    }
+
+    // The client aborting the tool call must end it at once, not count as a stall and retry.
+    [Fact]
+    public async Task ChatAsync_caller_cancellation_during_stream_is_not_retried()
+    {
+        var (client, handler) = Build();
+        handler.EnqueueSse(new[] { Delta("""{"reasoning_content":"thinking"}""") }, stall: true);
+        handler.EnqueueSse(SuccessChatStream);
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.ChatAsync(
+            new object[] { new { role = "user", content = "hi" } },
+            null, 0.7f, null, null, cts.Token));
+
+        Assert.Single(handler.Requests);
+    }
+
     [Fact]
     public async Task ChatAsync_with_reasoning_effort_serializes_into_body()
     {

@@ -65,7 +65,7 @@ try
     {
         var opts = sp.GetRequiredService<IOptions<GrokOptions>>().Value;
         http.Timeout = TimeSpan.FromSeconds(opts.HttpTimeoutSeconds);
-    });
+    }).ConfigurePrimaryHttpMessageHandler(GrokClient.CreateHandler);
 
     builder.Services
         .AddMcpServer()

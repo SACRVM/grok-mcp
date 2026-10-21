@@ -73,6 +73,7 @@ The server reads `config.env` files at startup. Priority (highest wins):
 | `GROK_MCP_LOG_LEVEL` | `Information` | `Trace`/`Debug`/`Information`/`Warning`/`Error` |
 | `GROK_MCP_LOG_DIR` | `%LOCALAPPDATA%\grok-mcp\logs` (Linux: `~/.local/share/grok-mcp/logs`) | rolling-file log directory |
 | `GROK_MCP_HTTP_TIMEOUT_SEC` | `3600` | per-request timeout to xAI (xAI's own recommendation for reasoning models); a timed-out call is not retried |
+| `GROK_MCP_STREAM_IDLE_SEC` | `120` | a streamed chat call that receives nothing for this long counts as dead and is retried (reasoning models send a chunk every few seconds while they think) |
 | `GROK_MCP_SESSION_CAP` | `50` | max turns retained per session |
 | `GROK_MCP_PORT` | `6677` | port the server binds on `127.0.0.1` |
 | `GROK_MCP_LOG_RETENTION_DAYS` | `30` | older `grok-mcp-*.log` files are deleted at startup; `0` disables pruning |

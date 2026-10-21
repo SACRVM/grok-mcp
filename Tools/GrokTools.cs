@@ -20,8 +20,9 @@ public class GrokTools
     private readonly ILogger<GrokTools> _log;
 
     // Claude Code aborts a tool call that sends neither a result nor a progress notification for
-    // 300 s. xAI sends nothing until a reasoning run is done, and a long document routinely thinks
-    // past that, so every xAI-bound call reports a heartbeat. Internal so tests can shrink it.
+    // 300 s. The answer exists only once a reasoning run is done, and a long document routinely
+    // thinks past that, so every xAI-bound call reports a heartbeat. Internal so tests can shrink it.
+    // Whether xAI is still alive behind it is GrokClient's job (stream watchdog, TCP keepalive).
     internal TimeSpan _heartbeatInterval = TimeSpan.FromSeconds(20);
 
     public GrokTools(

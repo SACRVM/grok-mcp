@@ -36,6 +36,19 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
         });
     }
 
+    // Streams each event as an SSE "data:" line. With `stall` the stream then goes silent without
+    // closing, the shape of a dead xAI run; reads honour cancellation so the client's watchdog can end it.
+    public void EnqueueSse(IEnumerable<string> events, bool stall = false)
+    {
+        var text = string.Concat(events.Select(e => $"data: {e}\n\n"));
+        _responders.Enqueue((_, _) =>
+        {
+            var content = new StreamContent(new SseStream(System.Text.Encoding.UTF8.GetBytes(text), stall));
+            content.Headers.ContentType = new MediaTypeHeaderValue("text/event-stream");
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+        });
+    }
+
     public void EnqueueStatus(HttpStatusCode status, string body = "")
     {
         _responders.Enqueue((_, _) => Task.FromResult(new HttpResponseMessage(status)
@@ -67,5 +80,38 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
                 $"FakeHttpMessageHandler: no response queued for {request.Method} {request.RequestUri}");
 
         return await _responders.Dequeue().Invoke(request, ct);
+    }
+
+    private sealed class SseStream(byte[] bytes, bool stall) : Stream
+    {
+        private int _pos;
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        {
+            if (_pos < bytes.Length)
+            {
+                var n = Math.Min(buffer.Length, bytes.Length - _pos);
+                bytes.AsMemory(_pos, n).CopyTo(buffer);
+                _pos += n;
+                return n;
+            }
+            if (stall) await Task.Delay(Timeout.Infinite, ct);
+            return 0;
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct) =>
+            ReadAsync(buffer.AsMemory(offset, count), ct).AsTask();
+        public override int Read(byte[] buffer, int offset, int count) =>
+            ReadAsync(buffer, offset, count, CancellationToken.None).GetAwaiter().GetResult();
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 }

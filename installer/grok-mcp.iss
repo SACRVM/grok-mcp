@@ -216,6 +216,7 @@ begin
     '# Optional runtime tuning:' + nl +
     '# GROK_MCP_LOG_LEVEL=Information' + nl +
     '# GROK_MCP_HTTP_TIMEOUT_SEC=3600' + nl +
+    '# GROK_MCP_STREAM_IDLE_SEC=120' + nl +
     '# GROK_MCP_SESSION_CAP=50' + nl;
   SaveStringToFile(ConfigEnvPath(), body, False);
 end;

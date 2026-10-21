@@ -19,9 +19,14 @@ public class GrokOptions
     // One model for text-to-video and image-to-video since xAI added text-to-video to 1.5
     // (2026-07-31). GROK_MCP_VIDEO_MODEL overrides it; the older grok-imagine-video tops out at 720p.
     public string VideoModel { get; set; } = "grok-imagine-video-1.5";
-    // xAI sends nothing until a reasoning run is finished, and a long document at any effort can
-    // think past five minutes. 3600 is what xAI's own reasoning examples configure.
+    // Hard cap on one xAI call. Non-streamed calls (multi-agent, images) send nothing until the run
+    // is finished, and a long document at any effort can think past five minutes. 3600 is what
+    // xAI's own reasoning examples configure.
     public int HttpTimeoutSeconds { get; set; } = 3600;
+    // A streamed chat call that receives nothing for this long counts as dead and is retried.
+    // Reasoning models stream a reasoning chunk every few seconds while they think (7 s was the
+    // longest gap measured on grok-4.7), so two minutes leaves room for a slow start on a huge prompt.
+    public int StreamIdleSeconds { get; set; } = 120;
     public int SessionTurnCap { get; set; } = 50;
     public int ListenPort { get; set; } = 6677;
     public int LogRetentionDays { get; set; } = 30;
@@ -76,6 +81,8 @@ public class GrokOptions
 
         if (int.TryParse(Environment.GetEnvironmentVariable("GROK_MCP_HTTP_TIMEOUT_SEC"), out var t) && t > 0)
             o.HttpTimeoutSeconds = t;
+        if (int.TryParse(Environment.GetEnvironmentVariable("GROK_MCP_STREAM_IDLE_SEC"), out var idle) && idle > 0)
+            o.StreamIdleSeconds = idle;
         if (int.TryParse(Environment.GetEnvironmentVariable("GROK_MCP_SESSION_CAP"), out var c) && c > 0)
             o.SessionTurnCap = c;
         if (int.TryParse(Environment.GetEnvironmentVariable("GROK_MCP_PORT"), out var p) && p > 0 && p <= 65535)

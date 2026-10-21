@@ -1,5 +1,6 @@
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using GrokMcp.Config;
@@ -24,6 +25,10 @@ public class GrokClient
     internal TimeSpan _videoPollInterval = TimeSpan.FromSeconds(5);
     internal TimeSpan _videoPollTimeout = TimeSpan.FromMinutes(10);
 
+    // Silence allowed on a streamed chat call before it counts as dead. From GrokOptions;
+    // internal-settable so tests can use milliseconds.
+    internal TimeSpan _streamIdleTimeout;
+
     private readonly HttpClient _http;
     private readonly GrokOptions _opts;
     private readonly ILogger<GrokClient> _log;
@@ -33,6 +38,7 @@ public class GrokClient
         _http = http;
         _opts = opts.Value;
         _log = log;
+        _streamIdleTimeout = TimeSpan.FromSeconds(_opts.StreamIdleSeconds);
 
         if (string.IsNullOrWhiteSpace(_opts.ApiKey))
             throw new InvalidOperationException("XAI_API_KEY environment variable is required.");
@@ -40,6 +46,33 @@ public class GrokClient
         if (!_http.DefaultRequestHeaders.UserAgent.Any())
             _http.DefaultRequestHeaders.UserAgent.ParseAdd("grok-mcp/1.0");
     }
+
+    // .NET opens sockets without TCP keepalive. A non-streamed call that waits minutes for its
+    // answer (multi-agent, images) leaves its connection idle that long, and a router or firewall
+    // that forgets idle connections leaves it dead without telling either end: the call then hangs
+    // until the HTTP timeout. Probes after 30 s of silence keep that state alive and turn a dead
+    // path into a socket error within about 90 s, which the retry loop handles.
+    internal static SocketsHttpHandler CreateHandler() => new()
+    {
+        ConnectCallback = async (context, ct) =>
+        {
+            var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+            try
+            {
+                socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+                socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime, 30);
+                socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveInterval, 10);
+                socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount, 6);
+                await socket.ConnectAsync(context.DnsEndPoint, ct);
+                return new NetworkStream(socket, ownsSocket: true);
+            }
+            catch
+            {
+                socket.Dispose();
+                throw;
+            }
+        },
+    };
 
     public async Task<ChatResult> ChatAsync(
         IEnumerable<object> messages,
@@ -352,16 +385,21 @@ public class GrokClient
         return body;
     }
 
+    // Chat completions always stream. The caller still gets one answer at the end, but the stream
+    // is how a dead run shows: a reasoning model sends reasoning_content chunks every few seconds
+    // while it thinks, where a non-streamed call is silent until it is done, dead or alive.
     private async Task<ChatResult> PostChatAsync(
         string endpoint,
-        object body,
+        Dictionary<string, object> body,
         IEnumerable<object> messages,
         string model,
         string? conversationId,
         CancellationToken ct)
     {
+        body["stream"] = true;
+        body["stream_options"] = new { include_usage = true };
         var promptPreview = TryExtractFirstUserText(messages);
-        var json = await PostWithRetryAsync(endpoint, body, model, promptPreview, conversationId, ct);
+        var json = await PostWithRetryAsync(endpoint, body, model, promptPreview, conversationId, ct, stream: true);
 
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
@@ -391,7 +429,8 @@ public class GrokClient
         string model,
         string promptPreview,
         string? conversationId,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool stream = false)
     {
         Exception? lastEx = null;
         var requestJson = JsonSerializer.Serialize(body);
@@ -417,26 +456,52 @@ public class GrokClient
             if (!string.IsNullOrEmpty(conversationId))
                 request.Headers.Add("x-grok-conv-id", conversationId);
 
-            HttpResponseMessage response;
+            // A streamed call is watched for silence: the watchdog fires when nothing has arrived
+            // for _streamIdleTimeout. HttpClient's own timeout stops covering the body once the
+            // headers are in, so the overall deadline is a token of ours that the watchdog hangs off.
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using var watchdog = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
+            if (stream)
+            {
+                deadline.CancelAfter(_http.Timeout);
+                watchdog.CancelAfter(_streamIdleTimeout);
+            }
+
+            HttpResponseMessage? response = null;
             string responseBody;
             try
             {
-                response = await _http.SendAsync(request, ct);
-                responseBody = await response.Content.ReadAsStringAsync(ct);
+                response = await _http.SendAsync(request,
+                    stream ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead,
+                    watchdog.Token);
+                responseBody = stream && response.IsSuccessStatusCode &&
+                               response.Content.Headers.ContentType?.MediaType == "text/event-stream"
+                    ? await ReadChatStreamAsync(response, watchdog)
+                    : await response.Content.ReadAsStringAsync(watchdog.Token);
             }
             catch (TaskCanceledException ex) when (!ct.IsCancellationRequested && ex.InnerException is TimeoutException)
             {
                 // HttpClient.Timeout elapsed. On a reasoning model that means xAI is still thinking,
                 // not that the network blipped: a retry restarts the same run from zero and bills it twice.
-                _log.LogWarning("Grok timeout after {Seconds}s (attempt {N}/{Max}, model={Model}), not retried",
-                    _http.Timeout.TotalSeconds, attempt, _retryDelays.Length, model);
-                throw new TimeoutException(
-                    $"xAI sent no answer within {_http.Timeout.TotalSeconds:0}s (model={model}). Not retried, because a " +
-                    "retry would restart the same reasoning from scratch. Raise GROK_MCP_HTTP_TIMEOUT_SEC if calls this long are expected.",
-                    ex);
+                response?.Dispose();
+                throw OverallTimeout(model, attempt, ex);
             }
-            catch (Exception ex) when (ex is HttpRequestException || ex is TaskCanceledException)
+            catch (OperationCanceledException ex) when (stream && !ct.IsCancellationRequested)
             {
+                response?.Dispose();
+                if (deadline.IsCancellationRequested)
+                    throw OverallTimeout(model, attempt, ex);
+                // Silence on a stream that should be ticking: the run or the connection is dead, so
+                // nothing will ever arrive on it. A retry is the only way to an answer.
+                lastEx = new TimeoutException(
+                    $"xAI went silent for {_streamIdleTimeout.TotalSeconds:0}s mid-call (GROK_MCP_STREAM_IDLE_SEC).", ex);
+                _log.LogWarning("Grok stream silent for {Seconds}s (attempt {N}/{Max}, model={Model})",
+                    _streamIdleTimeout.TotalSeconds, attempt, _retryDelays.Length, model);
+                continue;
+            }
+            catch (Exception ex) when (ex is HttpRequestException || ex is TaskCanceledException || ex is IOException)
+            {
+                response?.Dispose();
                 if (ct.IsCancellationRequested) throw;
                 lastEx = ex;
                 _log.LogWarning("Grok network failure (attempt {N}/{Max}, model={Model}): {Err}",
@@ -445,7 +510,10 @@ public class GrokClient
             }
 
             if (response.IsSuccessStatusCode)
+            {
+                response.Dispose();
                 return responseBody;
+            }
 
             var status = (int)response.StatusCode;
             var transient = status >= 500 || status == 429;
@@ -461,6 +529,59 @@ public class GrokClient
         throw new InvalidOperationException(
             $"Grok call failed after {_retryDelays.Length} attempts (model={model}). Last error: {lastEx?.Message}",
             lastEx);
+    }
+
+    // Folds a /chat/completions SSE stream back into the JSON a non-streamed call returns, so
+    // PostChatAsync parses one shape. Every line re-arms the watchdog, reasoning chunks included.
+    private async Task<string> ReadChatStreamAsync(HttpResponseMessage response, CancellationTokenSource watchdog)
+    {
+        await using var body = await response.Content.ReadAsStreamAsync(watchdog.Token);
+        using var reader = new StreamReader(body, Encoding.UTF8);
+        var content = new StringBuilder();
+        JsonElement? usage = null;
+
+        while (await reader.ReadLineAsync(watchdog.Token) is { } line)
+        {
+            watchdog.CancelAfter(_streamIdleTimeout);
+            // Blank lines separate events; lines starting with ':' are SSE keep-alive comments.
+            if (!line.StartsWith("data:", StringComparison.Ordinal)) continue;
+            var data = line[5..].Trim();
+            if (data == "[DONE]")
+            {
+                var assembled = new Dictionary<string, object>
+                {
+                    ["choices"] = new[] { new { message = new { content = content.ToString() } } },
+                };
+                if (usage is { } u) assembled["usage"] = u;
+                return JsonSerializer.Serialize(assembled);
+            }
+
+            using var chunk = JsonDocument.Parse(data);
+            var root = chunk.RootElement;
+            if (root.TryGetProperty("error", out var error))
+                throw new HttpRequestException($"Grok stream error: {error}");
+            // With include_usage the totals come in a final chunk; earlier chunks carry null.
+            if (root.TryGetProperty("usage", out var chunkUsage) && chunkUsage.ValueKind == JsonValueKind.Object)
+                usage = chunkUsage.Clone();
+            // Reasoning arrives as delta.reasoning_content and is not part of the answer.
+            if (root.TryGetProperty("choices", out var choices) &&
+                choices.ValueKind == JsonValueKind.Array && choices.GetArrayLength() > 0 &&
+                choices[0].TryGetProperty("delta", out var delta) &&
+                delta.TryGetProperty("content", out var text) && text.ValueKind == JsonValueKind.String)
+                content.Append(text.GetString());
+        }
+
+        throw new IOException("xAI closed the stream before [DONE].");
+    }
+
+    private TimeoutException OverallTimeout(string model, int attempt, Exception inner)
+    {
+        _log.LogWarning("Grok timeout after {Seconds}s (attempt {N}/{Max}, model={Model}), not retried",
+            _http.Timeout.TotalSeconds, attempt, _retryDelays.Length, model);
+        return new TimeoutException(
+            $"xAI sent no answer within {_http.Timeout.TotalSeconds:0}s (model={model}). Not retried, because a " +
+            "retry would restart the same reasoning from scratch. Raise GROK_MCP_HTTP_TIMEOUT_SEC if calls this long are expected.",
+            inner);
     }
 
     private static string TryExtractFirstUserText(IEnumerable<object> messages)
