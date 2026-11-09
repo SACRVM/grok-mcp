@@ -1,10 +1,14 @@
 {
-  "commands": [
-    { "name": "GitHub", "type": "url", "url": "https://github.com/SACRVM/grok-mcp", "icon": "🐙" }
-  ],
   "version": 1,
   "id": "grok-mcp",
 
-  "quickLinks": [
+  "commands": [
+    {
+      "group": "Git",
+      "name": "repo",
+      "description": "Opens the GitHub repository in the browser.",
+      "type": "url",
+      "url": "https://github.com/SACRVM/grok-mcp"
+    }
   ]
 }
