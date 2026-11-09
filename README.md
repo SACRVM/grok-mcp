@@ -52,6 +52,26 @@ The script is per-user, no sudo. It will:
 
 Re-running it is safe and is also how you update: an existing key is kept and the service restarts on the new build. `scripts/install-linux.sh --uninstall` removes the service, binary and Claude Code registration, and keeps `config.env` and the logs.
 
+## Claude Code plugin
+
+This repository is also a Claude Code plugin marketplace. The `grok` plugin connects Claude Code to the running server and adds two skills:
+
+| Skill | What it does |
+|---|---|
+| `/grok:review` | An independent second opinion on a plan, design, API or decision before it is built: what to send, how to frame the request, which settings, and how to check Grok's findings before adopting them. |
+| `/grok:editor` | Grok as an outside editor for a book or other long-form text: developmental edit, line edit, beta-reader reaction or consistency check, chapter by chapter, with a style sheet that keeps the author's decisions between rounds. |
+
+Claude also picks these skills up on its own when you ask for a Grok review or for editorial feedback. Both ask you before anything is sent to xAI, because it costs money and leaves your machine.
+
+Install the server first (above). The plugin does not install it. Then, in Claude Code:
+
+```
+/plugin marketplace add SACRVM/grok-mcp
+/plugin install grok@grok-mcp
+```
+
+If the installer already registered `grok` with Claude Code, keep that registration. Claude Code sees that the plugin points at the same URL and connects only once.
+
 ## Configuration
 
 The server reads `config.env` files at startup. Priority (highest wins):

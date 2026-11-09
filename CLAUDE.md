@@ -66,6 +66,8 @@ On Linux, re-run `scripts/install-linux.sh`. It publishes into a temp dir, copie
 
 - **`installer\seed-config.ps1`** — Writes a `config.env` template to `%LOCALAPPDATA%\grok-mcp\config.env` only if the file doesn't exist (idempotent across re-installs).
 
+- **`.claude-plugin/marketplace.json` + `plugins/grok/`** — The repo doubles as a Claude Code plugin marketplace. The `grok` plugin declares the server inline in `plugin.json` (`mcpServers`), not in a plugin `.mcp.json`, because `.gitignore` drops every `.mcp.json`. Claude Code treats a plugin server with the same URL as the installer's user-scope `grok` as a duplicate and connects once, so both can coexist. The skills `skills/review` and `skills/editor` (`/grok:review`, `/grok:editor`) carry the field experience of using Grok as a reviewer and as an editor; the repo is public, so they hold generalised lessons only, no project names or private details. `version` is deliberately unset so users track commits; `claude plugin validate ./plugins/grok` and `claude plugin validate .` check both manifests.
+
 ## Conventions
 
 - All Grok HTTP calls go through `GrokClient.PostWithRetryAsync`. New endpoints should use it so retry + logging stay uniform.

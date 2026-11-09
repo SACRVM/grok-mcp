@@ -1,0 +1,19 @@
+{
+  "name": "grok",
+  "displayName": "Grok",
+  "description": "Grok (xAI) inside Claude Code through a local grok-mcp server: chat, vision, image and video tools, plus skills for an independent review and for editing long-form text. Requires grok-mcp to be installed and running on 127.0.0.1:6677.",
+  "author": {
+    "name": "SACRVM",
+    "url": "https://github.com/SACRVM"
+  },
+  "homepage": "https://github.com/SACRVM/grok-mcp#claude-code-plugin",
+  "repository": "https://github.com/SACRVM/grok-mcp",
+  "license": "MIT",
+  "keywords": ["grok", "xai", "review", "second-opinion", "editing", "image-generation"],
+  "mcpServers": {
+    "grok": {
+      "type": "http",
+      "url": "http://127.0.0.1:6677/mcp"
+    }
+  }
+}

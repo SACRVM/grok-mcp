@@ -1,0 +1,15 @@
+{
+  "name": "grok-mcp",
+  "description": "Claude Code plugins for grok-mcp, the local MCP server for the xAI Grok API.",
+  "owner": {
+    "name": "SACRVM",
+    "url": "https://github.com/SACRVM"
+  },
+  "plugins": [
+    {
+      "name": "grok",
+      "source": "./plugins/grok",
+      "description": "Connects Claude Code to a running grok-mcp server and adds two skills: an independent Grok review of plans and designs, and Grok as an outside editor for books and long-form text."
+    }
+  ]
+}

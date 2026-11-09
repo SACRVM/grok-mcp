@@ -9,6 +9,12 @@ All notable changes to grok-mcp are documented here. Format loosely follows
 grok-mcp now runs on Linux.
 
 ### Added
+- Claude Code plugin marketplace in the repository (`.claude-plugin/`,
+  `plugins/grok/`). The `grok` plugin connects to the running server and
+  ships two skills: `review`, an independent Grok review of plans and
+  designs, and `editor`, Grok as an outside editor for long-form text.
+  Install with `/plugin marketplace add SACRVM/grok-mcp`, then
+  `/plugin install grok@grok-mcp`.
 - `scripts/install-linux.sh`: builds from source and installs per-user, no
   sudo — systemd user service (starts at login, restarts on crash), key in
   `~/.config/grok-mcp/config.env`, user-scope registration with Claude Code.
